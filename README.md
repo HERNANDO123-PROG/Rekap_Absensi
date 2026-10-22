@@ -64,4 +64,4 @@ The production assets are written to `public/build`. Do not run `npm run dev` in
 - `/rekap-periode`, `/rekap-tahunan`, and `/rekap/pegawai/{employee}`
 - Protected JSON/report/export endpoints are listed by `php artisan route:list`.
 
-All administration and reporting pages require authentication. Import and attendance source records remain read-only during reporting and export.
+All administration and reporting pages require authentication. Import and attendance source records remain read-only during reporting and export.# Rekap_Absensi
