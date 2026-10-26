@@ -104,6 +104,85 @@ document.addEventListener('submit', async (event) => {
     }
 });
 
+document.addEventListener('click', (event) => {
+    const editButton = event.target.closest('[data-edit-period]');
+    const cancelButton = event.target.closest('[data-cancel-period-edit]');
+    const nationalEventButton = event.target.closest('[data-apply-national-event]');
+    const editCalendarButton = event.target.closest('[data-edit-calendar]');
+    const cancelCalendarButton = event.target.closest('[data-cancel-calendar-edit]');
+    const form = document.querySelector('#schedule-period-form');
+
+    if (nationalEventButton) {
+        const calendarForm = document.querySelector('#calendar-entry-form');
+        if (!calendarForm) return;
+        delete calendarForm.dataset.method;
+        calendarForm.dataset.endpoint = calendarForm.dataset.storeEndpoint;
+        calendarForm.querySelector('button[type="submit"]').textContent = 'Simpan agenda';
+        calendarForm.querySelector('[data-cancel-calendar-edit]').classList.add('hidden');
+        calendarForm.querySelector('[name="date"]').value = nationalEventButton.dataset.date;
+        calendarForm.querySelector('[name="title"]').value = nationalEventButton.dataset.title;
+        calendarForm.querySelector('[name="type"]').value = 'holiday';
+        calendarForm.querySelector('[name="is_working_day"][type="checkbox"]').checked = false;
+        calendarForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        calendarForm.querySelector('[name="unit_id"]').focus();
+        return;
+    }
+
+    if (editCalendarButton || cancelCalendarButton) {
+        const calendarForm = document.querySelector('#calendar-entry-form');
+        if (!calendarForm) return;
+        if (editCalendarButton) {
+            calendarForm.dataset.endpoint = editCalendarButton.dataset.endpoint;
+            calendarForm.dataset.method = 'PUT';
+            calendarForm.querySelector('[name="unit_id"]').value = editCalendarButton.dataset.unit;
+            calendarForm.querySelector('[name="date"]').value = editCalendarButton.dataset.date;
+            calendarForm.querySelector('[name="type"]').value = editCalendarButton.dataset.type;
+            calendarForm.querySelector('[name="title"]').value = editCalendarButton.dataset.title || '';
+            calendarForm.querySelector('[name="description"]').value = editCalendarButton.dataset.description || '';
+            calendarForm.querySelector('[name="is_working_day"][type="checkbox"]').checked = editCalendarButton.dataset.working === '1';
+            calendarForm.querySelector('[name="start_time"]').value = editCalendarButton.dataset.start;
+            calendarForm.querySelector('[name="end_time"]').value = editCalendarButton.dataset.end;
+            calendarForm.querySelector('button[type="submit"]').textContent = 'Perbarui agenda';
+            calendarForm.querySelector('[data-cancel-calendar-edit]').classList.remove('hidden');
+            calendarForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else {
+            calendarForm.reset();
+            delete calendarForm.dataset.method;
+            calendarForm.dataset.endpoint = calendarForm.dataset.storeEndpoint;
+            calendarForm.querySelector('button[type="submit"]').textContent = 'Simpan agenda';
+            cancelCalendarButton.classList.add('hidden');
+        }
+        return;
+    }
+
+    if (!form) return;
+
+    if (editButton) {
+        form.dataset.endpoint = editButton.dataset.endpoint;
+        form.dataset.method = 'PUT';
+        form.querySelector('[name="name"]').value = editButton.dataset.name;
+        form.querySelector('[name="unit_id"]').value = editButton.dataset.unit || '';
+        const category = form.querySelector('[name="work_schedule_category_id"]');
+        category.value = editButton.dataset.category;
+        category.dispatchEvent(new Event('change', { bubbles: true }));
+        form.querySelector('[name="work_schedule_profile_id"]').value = editButton.dataset.profile;
+        form.querySelector('[name="start_date"]').value = editButton.dataset.start;
+        form.querySelector('[name="end_date"]').value = editButton.dataset.end;
+        form.querySelector('[name="is_active"]').value = editButton.dataset.active;
+        form.querySelector('button[type="submit"]').textContent = 'Perbarui jadwal periode';
+        form.querySelector('[data-cancel-period-edit]').classList.remove('hidden');
+        form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else if (cancelButton) {
+        form.reset();
+        delete form.dataset.method;
+        form.dataset.endpoint = form.dataset.storeEndpoint;
+        form.querySelector('button[type="submit"]').textContent = 'Simpan jadwal periode';
+        cancelButton.classList.add('hidden');
+        const category = form.querySelector('[name="work_schedule_category_id"]');
+        category.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+});
+
 const massProfileDialog = document.querySelector('#mass-profile-dialog');
 const massProfileReadinessDialog = document.querySelector('#mass-profile-readiness-dialog');
 let readinessDialogOpener = null;

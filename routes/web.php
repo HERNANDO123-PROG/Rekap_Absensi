@@ -7,10 +7,12 @@ use App\Http\Controllers\FingerprintImportController;
 use App\Http\Controllers\FingerprintPeriodReportController;
 use App\Http\Controllers\LeaveImportController;
 use App\Http\Controllers\ManualLeaveRequestController;
+use App\Http\Controllers\NationalCalendarController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\ReportExportController;
 use App\Http\Controllers\WorkCalendarController;
 use App\Http\Controllers\WorkScheduleCategoryController;
+use App\Http\Controllers\WorkSchedulePeriodController;
 use App\Http\Controllers\WorkScheduleController;
 use App\Models\Employee;
 use Illuminate\Support\Facades\Auth;
@@ -129,6 +131,15 @@ Route::middleware('auth')->group(function () {
     Route::delete('/work-calendars/{calendar}', [WorkCalendarController::class, 'destroy'])->name('work-calendars.destroy');
     Route::post('/work-calendars/upsert', [WorkCalendarController::class, 'upsert'])->name('work-calendars.upsert');
     Route::post('/work-calendars/bulk-upsert', [WorkCalendarController::class, 'bulkUpsert'])->name('work-calendars.bulk-upsert');
+
+    Route::get('/national-calendar-events', [NationalCalendarController::class, 'index'])->name('national-calendar-events.index');
+    Route::post('/national-calendar-events/sync', [NationalCalendarController::class, 'sync'])->name('national-calendar-events.sync');
+    Route::post('/national-calendar-events/{event}/verify', [NationalCalendarController::class, 'verify'])->name('national-calendar-events.verify');
+
+    Route::get('/work-schedule-periods', [WorkSchedulePeriodController::class, 'index'])->name('work-schedule-periods.index');
+    Route::post('/work-schedule-periods', [WorkSchedulePeriodController::class, 'store'])->name('work-schedule-periods.store');
+    Route::put('/work-schedule-periods/{period}', [WorkSchedulePeriodController::class, 'update'])->name('work-schedule-periods.update');
+    Route::delete('/work-schedule-periods/{period}', [WorkSchedulePeriodController::class, 'destroy'])->name('work-schedule-periods.destroy');
 });
 
 require __DIR__.'/auth.php';

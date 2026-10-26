@@ -65,3 +65,9 @@ The production assets are written to `public/build`. Do not run `npm run dev` in
 - Protected JSON/report/export endpoints are listed by `php artisan route:list`.
 
 All administration and reporting pages require authentication. Import and attendance source records remain read-only during reporting and export.# Rekap_Absensi
+
+## Kalender Operasional Sekolah
+
+The existing `/work-calendar` page manages manual school decisions, candidate national holidays, and date-scoped schedule profiles. A national-calendar sync uses the documented Nager.Date public-holidays endpoint (`/PublicHolidays/{year}/ID`). It provides public-holiday candidates only; it does not supply Indonesian collective-leave decisions or authoritative Ramadan dates. Admins must compare each candidate with an official government notice, provide its `.go.id` reference to mark the source verified, and separately create a school calendar entry to change attendance processing. Pending or verified API events never directly alter attendance.
+
+`NAGER_DATE_BASE_URL` and `NAGER_DATE_COUNTRY` in `.env` configure the public endpoint and country code; no API key is required. Run `php artisan migrate` to add the national-event staging and schedule-period tables without resetting existing data. Schedule periods reuse the existing day-of-week schedule profiles, are scoped by unit (one or both) and employee category, and reject overlapping active rules of equal scope. Their saved attendance times are snapshots; changing a calendar or period does not automatically rewrite historical attendance records. The daily attendance processor uses the explicit calendar override first, then an active scoped schedule period, then the regular TK/SD schedule; Sunday and TK Saturday are routine rest days, and SD's fifth Saturday is a rest day unless an explicit school calendar decision overrides it.# Rekap_Absensi

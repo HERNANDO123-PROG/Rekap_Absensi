@@ -32,6 +32,9 @@ class AttendanceStatusResolver
 
         if ($schedule['is_holiday']) {
             $status = AttendanceStatus::Holiday;
+        } elseif ($schedule['schedule_conflict'] ?? false) {
+            $needsVerification = true;
+            $verificationNote = 'Terdapat konflik periode jadwal aktif. Selesaikan konflik sebelum menghitung absensi.';
         } elseif ($leaveResolution['has_conflict']) {
             $needsVerification = true;
             $verificationNote = 'Terdapat lebih dari satu pengajuan izin yang cocok pada tanggal ini.';

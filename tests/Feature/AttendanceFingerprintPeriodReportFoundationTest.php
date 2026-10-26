@@ -147,12 +147,12 @@ class AttendanceFingerprintPeriodReportFoundationTest extends TestCase
         $this->assertSame(23, $default['pagination']['total']);
         $this->assertSame(2, $default['pagination']['last_page']);
         $this->assertCount(20, $default['data']);
-        $this->assertSame(30, $default['summary']['unknown_date_count']);
-        $this->assertSame(600, $default['summary']['page_ambiguous_employee_day_count']);
+        $this->assertSame(26, $default['summary']['unknown_date_count']);
+        $this->assertSame(520, $default['summary']['page_ambiguous_employee_day_count']);
         $this->assertSame(2, $lastPage['pagination']['current_page']);
         $this->assertCount(3, $lastPage['data']);
-        $this->assertSame(30, $lastPage['summary']['unknown_date_count']);
-        $this->assertSame(90, $lastPage['summary']['page_ambiguous_employee_day_count']);
+        $this->assertSame(26, $lastPage['summary']['unknown_date_count']);
+        $this->assertSame(78, $lastPage['summary']['page_ambiguous_employee_day_count']);
         $this->assertSame(100, $largePage['pagination']['per_page']);
         $this->assertCount(23, $largePage['data']);
     }
@@ -198,8 +198,8 @@ class AttendanceFingerprintPeriodReportFoundationTest extends TestCase
             $this->assertNull($row[$metric]);
         }
         $this->assertSame(0, $result['summary']['provisional_day_count']);
-        $this->assertSame(30, $result['summary']['unknown_date_count']);
-        $this->assertSame(30, $result['summary']['page_ambiguous_employee_day_count']);
+        $this->assertSame(26, $result['summary']['unknown_date_count']);
+        $this->assertSame(26, $result['summary']['page_ambiguous_employee_day_count']);
         $this->assertSame('none', $row['daily'][0]['leave_status']);
         $this->assertSame($recordCount, AttendanceRecord::query()->count());
         $this->assertEquals($recordBefore, $record->fresh()->getAttributes());

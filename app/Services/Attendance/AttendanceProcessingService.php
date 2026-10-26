@@ -320,7 +320,13 @@ class AttendanceProcessingService
     ): array {
         $anomalies = [];
 
-        if ($schedule['missing_schedule']) {
+        if ($schedule['schedule_conflict'] ?? false) {
+            $anomalies[] = [
+                AttendanceAnomalyType::InvalidSchedule,
+                'Terdapat konflik periode jadwal aktif; absensi menunggu penyelesaian admin.',
+                AnomalySeverity::Critical,
+            ];
+        } elseif ($schedule['missing_schedule']) {
             $anomalies[] = [
                 AttendanceAnomalyType::MissingSchedule,
                 'Tidak ditemukan kalender override atau jadwal mingguan untuk unit dan tanggal ini.',

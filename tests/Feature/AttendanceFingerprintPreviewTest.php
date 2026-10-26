@@ -2,14 +2,14 @@
 
 namespace Tests\Feature;
 
-use App\Enums\EmployeeStatus;
 use App\Enums\AnomalySeverity;
 use App\Enums\AttendanceAnomalyType;
 use App\Enums\AttendanceIntervalSource;
 use App\Enums\AttendanceIntervalType;
 use App\Enums\AttendanceStatus;
-use App\Enums\LeaveType;
+use App\Enums\EmployeeStatus;
 use App\Enums\ImportBatchStatus;
+use App\Enums\LeaveType;
 use App\Enums\MatchingStatus;
 use App\Enums\WorkCalendarType;
 use App\Models\AttendanceAnomaly;
@@ -22,14 +22,15 @@ use App\Models\LeaveImportBatch;
 use App\Models\LeaveRequest;
 use App\Models\Unit;
 use App\Models\WorkCalendar;
-use App\Models\WorkScheduleCategory;
 use App\Models\WorkSchedule;
+use App\Models\WorkScheduleCategory;
 use App\Models\WorkScheduleProfile;
 use App\Models\WorkScheduleProfileRule;
 use App\Services\Attendance\AttendanceProcessingService;
 use App\Services\Reports\AttendanceFingerprintPreviewService;
 use App\Services\WorkScheduleProfileService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class AttendanceFingerprintPreviewTest extends TestCase
@@ -258,7 +259,7 @@ class AttendanceFingerprintPreviewTest extends TestCase
         $this->assertSame('13:00', $days[1]['schedule_end']);
     }
 
-    public function test_calendar_workday_without_hours_uses_individual_profile_and_unit_weekly_nonwork_stays_holiday(): void
+    public function test_individual_profile_overrides_unit_weekly_nonwork_on_regular_weekdays(): void
     {
         $unit = Unit::create(['name' => 'SD', 'code' => 'SD']);
         $category = $this->createBtqCategory();
@@ -291,8 +292,8 @@ class AttendanceFingerprintPreviewTest extends TestCase
         $this->assertSame('08:00', $days[0]['schedule_start']);
         $this->assertSame('14:00', $days[0]['schedule_end']);
         $this->assertSame('calendar', $days[0]['schedule_source']);
-        $this->assertSame('Libur', $days[1]['schedule_status']);
-        $this->assertSame('weekly_schedule', $days[1]['schedule_source']);
+        $this->assertSame('Hari kerja', $days[1]['schedule_status']);
+        $this->assertSame('employee_profile', $days[1]['schedule_source']);
     }
 
     public function test_calendar_from_another_unit_or_date_does_not_affect_preview_schedule(): void
@@ -394,7 +395,7 @@ class AttendanceFingerprintPreviewTest extends TestCase
         $this->assertNull($preview['late_estimate']);
 
         $category->update(['is_active' => false]);
-        $this->expectException(\Illuminate\Validation\ValidationException::class);
+        $this->expectException(ValidationException::class);
         app(AttendanceFingerprintPreviewService::class)->generate(
             $unit->id,
             $category->id,

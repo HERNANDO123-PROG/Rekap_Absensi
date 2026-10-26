@@ -13,12 +13,14 @@ class AttendanceRecapCalculator
     public function calculate(AttendanceRecord $record): array
     {
         $date = CarbonImmutable::parse($record->attendance_date);
-        $isWorkday = $date->dayOfWeekIso < 7;
         $actualIn = $this->time($record->getRawOriginal('actual_in'));
         $actualOut = $this->time($record->getRawOriginal('actual_out'));
         $scheduledIn = $this->time($record->getRawOriginal('scheduled_in'));
         $scheduledOut = $this->time($record->getRawOriginal('scheduled_out'));
         $status = $record->status?->value ?? $record->status;
+        $isWorkday = $date->dayOfWeekIso < 7
+            && ! $record->is_holiday
+            && $status !== AttendanceStatus::Holiday->value;
         $isNonAttendanceStatus = in_array($status, [
             AttendanceStatus::OfficialDuty->value,
             AttendanceStatus::Absent->value,

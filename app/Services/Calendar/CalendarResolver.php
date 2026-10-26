@@ -6,8 +6,9 @@ use App\Enums\WorkCalendarType;
 use App\Models\Employee;
 use App\Models\Unit;
 use App\Models\WorkCalendar;
-use App\Models\WorkScheduleCategory;
 use App\Models\WorkSchedule;
+use App\Models\WorkScheduleCategory;
+use App\Models\WorkSchedulePeriod;
 use App\Services\EmployeeScheduleProfileValidator;
 use Carbon\CarbonImmutable;
 
@@ -111,13 +112,73 @@ class CalendarResolver
             );
         }
 
+        $periods = $categoryId === null
+            ? collect()
+            : WorkSchedulePeriod::query()
+                ->with('profile.rules')
+                ->where('work_schedule_category_id', $categoryId)
+                ->where('is_active', true)
+                ->whereDate('start_date', '<=', $date)
+                ->whereDate('end_date', '>=', $date)
+                ->where(function ($query) use ($unitId): void {
+                    $query->whereNull('unit_id')->orWhere('unit_id', $unitId);
+                })
+                ->get();
+
+        if ($periods->count() > 1) {
+            return [
+                ...$this->missing($unitId, $date),
+                'schedule_conflict' => true,
+                'source' => 'schedule_period',
+            ];
+        }
+
+        if ($period = $periods->first()) {
+            $rule = $period->profile?->rules->firstWhere('day_of_week', $parsedDate->dayOfWeek);
+
+            if ($rule === null) {
+                return [
+                    ...$this->invalidSchedule($unitId, $date, 'schedule_period'),
+                    'title' => $period->name,
+                ];
+            }
+
+            $resolved = $this->resolveEntry($unitId, $date, 'schedule_period', $rule);
+            if ($rule->is_working_day && ! $this->hasValidTimeRange($rule->start_time, $rule->end_time)) {
+                return [
+                    ...$this->invalidSchedule($unitId, $date, 'schedule_period'),
+                    'title' => $period->name,
+                ];
+            }
+
+            return [
+                ...$resolved,
+                'title' => $period->name,
+                'work_schedule_profile_id' => $period->work_schedule_profile_id,
+                'work_schedule_period_id' => $period->id,
+            ];
+        }
+
+        $isRoutineRestDay = $parsedDate->dayOfWeekIso === 7
+            || ($unit->code === 'TK' && $parsedDate->dayOfWeekIso === 6)
+            || ($unit->code === 'SD' && $parsedDate->dayOfWeekIso === 6 && intdiv($parsedDate->day - 1, 7) + 1 === 5);
+        if ($isRoutineRestDay) {
+            return [
+                ...$this->resolveEntry($unitId, $date, 'routine_schedule', (object) [
+                    'is_working_day' => false,
+                    'start_time' => null,
+                    'end_time' => null,
+                ]),
+                'title' => $unit->code === 'SD' && $parsedDate->dayOfWeekIso === 6
+                    ? 'Sabtu kelima'
+                    : 'Hari libur rutin',
+            ];
+        }
+
         $weeklySchedule = WorkSchedule::query()
             ->where('unit_id', $unitId)
             ->where('day_of_week', $parsedDate->dayOfWeek)
             ->first();
-        if ($weeklySchedule !== null && ! $weeklySchedule->is_working_day) {
-            return $this->resolveEntry($unitId, $date, 'weekly_schedule', $weeklySchedule);
-        }
 
         if ($employee !== null && $employee->work_schedule_profile_id !== null && $categoryId === null) {
             return $this->invalidSchedule(
@@ -171,6 +232,7 @@ class CalendarResolver
                         $category->workScheduleProfile->end_time,
                     );
                 }
+
                 return $this->resolveProfileRule($unitId, $date, 'category_normal', $rule);
             }
 
@@ -179,9 +241,11 @@ class CalendarResolver
             }
         }
 
-        return $weeklySchedule === null
-            ? $this->missing($unitId, $date)
-            : $this->resolveEntry($unitId, $date, 'weekly_schedule', $weeklySchedule);
+        if ($weeklySchedule !== null) {
+            return $this->resolveEntry($unitId, $date, 'weekly_schedule', $weeklySchedule);
+        }
+
+        return $this->missing($unitId, $date);
     }
 
     private function resolveCategory(?int $categoryId): ?WorkScheduleCategory

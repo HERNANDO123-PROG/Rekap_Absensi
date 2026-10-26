@@ -174,7 +174,8 @@ class FingerprintPeriodIntegrationTest extends TestCase
             ->assertSee('Tanggal belum dapat dipastikan')
             ->assertSee('Data belum cukup')
             ->assertSee('Tanggal belum dapat dipastikan karena kalender, jadwal rutin, atau bukti fingerprint belum cukup.')
-            ->assertSee('fingerprint_inference');
+            ->assertSee('routine_schedule')
+            ->assertDontSee('fingerprint_inference');
     }
 
     public function test_fingerprint_export_includes_all_filtered_employees_across_pages_and_preserves_nulls(): void

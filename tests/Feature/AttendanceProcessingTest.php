@@ -25,12 +25,12 @@ use App\Models\WorkSchedule;
 use App\Models\WorkScheduleCategory;
 use App\Models\WorkScheduleProfile;
 use App\Models\WorkScheduleProfileRule;
-use App\Services\WorkScheduleCategoryService;
 use App\Services\Attendance\AttendanceIntervalBuilder;
 use App\Services\Attendance\AttendanceProcessingService;
 use App\Services\Calendar\CalendarResolver;
 use App\Services\Fingerprint\FingerprintImportService;
 use App\Services\Reports\AttendanceRecapCalculator;
+use App\Services\WorkScheduleCategoryService;
 use App\Services\WorkScheduleProfileService;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Events\QueryExecuted;
@@ -204,7 +204,7 @@ class AttendanceProcessingTest extends TestCase
         $this->assertFalse($record->needs_verification);
     }
 
-    public function test_weekly_unit_non_working_day_still_precedes_individual_profile(): void
+    public function test_individual_profile_overrides_unit_weekly_non_working_day(): void
     {
         $unit = $this->createUnit('SD');
         $category = $this->createCategory('Weekly rest precedence', '06:55', '15:40');
@@ -216,8 +216,8 @@ class AttendanceProcessingTest extends TestCase
 
         $record = $this->process($unit, $employee);
 
-        $this->assertSame(AttendanceStatus::Holiday, $record->status);
-        $this->assertNull($record->scheduled_in);
+        $this->assertSame(AttendanceStatus::Present, $record->status);
+        $this->assertSame('08:00', substr($record->scheduled_in, 0, 5));
     }
 
     public function test_invalid_individual_profiles_require_verification_without_category_fallback(): void
@@ -918,7 +918,7 @@ class AttendanceProcessingTest extends TestCase
     public function test_weekly_non_working_schedule_is_holiday_even_without_calendar_entry(): void
     {
         $unit = $this->createUnit('TK');
-        $employee = $this->createEmployee($unit);
+        $employee = $this->createEmployee($unit, assignCategory: false);
         $this->createSchedule($unit, self::DATE, isWorkingDay: false, start: null, end: null);
         $this->createFingerprintLogs($unit, $employee, self::DATE, ['08:00', '12:00']);
 
@@ -1433,6 +1433,7 @@ class AttendanceProcessingTest extends TestCase
             'nama_lengkap' => $name,
             'status' => $status,
         ]);
+
         return $employee;
     }
 

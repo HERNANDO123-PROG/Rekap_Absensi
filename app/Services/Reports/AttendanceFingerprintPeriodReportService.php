@@ -9,8 +9,10 @@ use App\Enums\MatchingStatus;
 use App\Models\Employee;
 use App\Models\FingerprintLog;
 use App\Models\LeaveRequest;
+use App\Models\Unit;
 use App\Models\WorkCalendar;
 use App\Models\WorkSchedule;
+use App\Models\WorkSchedulePeriod;
 use App\Models\WorkScheduleProfileRule;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -55,6 +57,16 @@ class AttendanceFingerprintPeriodReportService
             ->whereBetween('date', [$filters->startDate, $filters->endDate])
             ->get()
             ->keyBy(fn (WorkCalendar $calendar): string => $calendar->date->format('Y-m-d'));
+        $unit = Unit::query()->findOrFail($filters->unitId);
+        $schedulePeriods = WorkSchedulePeriod::query()
+            ->with('profile.rules')
+            ->where('is_active', true)
+            ->whereDate('start_date', '<=', $filters->endDate)
+            ->whereDate('end_date', '>=', $filters->startDate)
+            ->where(function ($query) use ($filters): void {
+                $query->whereNull('unit_id')->orWhere('unit_id', $filters->unitId);
+            })
+            ->get();
         $weeklyByDay = WorkSchedule::query()
             ->where('unit_id', $filters->unitId)
             ->get()
@@ -72,6 +84,22 @@ class AttendanceFingerprintPeriodReportService
                 $dayStatuses[$date] = [
                     'status' => $calendar->is_working_day ? 'working' : 'non_working',
                     'source' => 'calendar',
+                    'is_provisional' => false,
+                    'is_ambiguous' => false,
+                ];
+
+                continue;
+            }
+
+            $parsedDate = CarbonImmutable::parse($date);
+            if (
+                ($unit->code === 'TK' && $parsedDate->dayOfWeekIso >= 6)
+                || ($unit->code === 'SD' && $parsedDate->dayOfWeekIso === 7)
+                || ($unit->code === 'SD' && $parsedDate->dayOfWeekIso === 6 && intdiv($parsedDate->day - 1, 7) + 1 === 5)
+            ) {
+                $dayStatuses[$date] = [
+                    'status' => 'non_working',
+                    'source' => 'routine_schedule',
                     'is_provisional' => false,
                     'is_ambiguous' => false,
                 ];
@@ -120,11 +148,47 @@ class AttendanceFingerprintPeriodReportService
                 $leavesByEmployeeDate,
                 $calendarByDate,
                 $weeklyByDay,
+                $schedulePeriods,
+                $filters,
             ): array {
                 $daily = [];
 
                 foreach ($dates as $date) {
                     $day = $dayStatuses[$date];
+                    $calendar = $calendarByDate->get($date);
+                    $matchingPeriods = $schedulePeriods
+                        ->where('work_schedule_category_id', $employee->category_id)
+                        ->filter(fn (WorkSchedulePeriod $period): bool => (
+                            $period->unit_id === null || (int) $period->unit_id === $filters->unitId
+                        ) && $period->start_date->lessThanOrEqualTo($date)
+                            && $period->end_date->greaterThanOrEqualTo($date))
+                        ->values();
+                    if ($calendar === null) {
+                        if ($matchingPeriods->count() > 1) {
+                            $day = [
+                                'status' => 'unknown',
+                                'source' => 'schedule_period_conflict',
+                                'is_provisional' => false,
+                                'is_ambiguous' => true,
+                            ];
+                        } elseif ($matchingPeriods->isNotEmpty()) {
+                            $periodRule = $matchingPeriods->first()->profile?->rules
+                                ->firstWhere('day_of_week', CarbonImmutable::parse($date)->dayOfWeek);
+                            $day = $periodRule === null
+                                ? [
+                                    'status' => 'unknown',
+                                    'source' => 'schedule_period',
+                                    'is_provisional' => false,
+                                    'is_ambiguous' => true,
+                                ]
+                                : [
+                                    'status' => $periodRule->is_working_day ? 'working' : 'non_working',
+                                    'source' => 'schedule_period',
+                                    'is_provisional' => false,
+                                    'is_ambiguous' => false,
+                                ];
+                        }
+                    }
                     $logs = $logsByDate->get($date, collect())
                         ->where('employee_id', $employee->id)
                         ->values();
@@ -136,9 +200,26 @@ class AttendanceFingerprintPeriodReportService
                     $schedule = $this->scheduleForDate(
                         $employee,
                         $date,
-                        $calendarByDate->get($date),
+                        $calendar,
                         $weeklyByDay->get(CarbonImmutable::parse($date)->dayOfWeek),
+                        $matchingPeriods->first(),
                     );
+                    if (
+                        $calendar === null
+                        && $day['source'] !== 'routine_schedule'
+                        && $matchingPeriods->count() <= 1
+                        && $schedule['is_working_day'] !== null
+                    ) {
+                        $scheduleNeedsReview = $schedule['is_working_day'] && ! $schedule['valid'];
+                        $day = [
+                            'status' => $scheduleNeedsReview
+                                ? 'unknown'
+                                : ($schedule['is_working_day'] ? 'working' : 'non_working'),
+                            'source' => $schedule['source'],
+                            'is_provisional' => false,
+                            'is_ambiguous' => $scheduleNeedsReview,
+                        ];
+                    }
                     $scanResult = $this->evaluateScans($logs, $schedule);
                     $statusUnknown = $day['status'] === 'unknown';
                     $isWorking = $day['status'] === 'working';
@@ -316,11 +397,64 @@ class AttendanceFingerprintPeriodReportService
         string $date,
         ?WorkCalendar $calendar,
         ?WorkSchedule $weekly,
+        ?WorkSchedulePeriod $period = null,
     ): array {
         $start = null;
         $end = null;
         $source = null;
         $historyLimited = false;
+        $isWorkingDay = null;
+
+        if ($calendar !== null && ! $calendar->is_working_day) {
+            return [
+                'start' => null,
+                'end' => null,
+                'source' => 'calendar',
+                'valid' => false,
+                'overnight' => false,
+                'history_limited' => false,
+                'is_working_day' => false,
+            ];
+        }
+
+        if ($period !== null && $calendar === null) {
+            $rule = $period->profile?->rules->firstWhere('day_of_week', CarbonImmutable::parse($date)->dayOfWeek);
+            if ($rule === null) {
+                return [
+                    'start' => null,
+                    'end' => null,
+                    'source' => 'schedule_period',
+                    'valid' => false,
+                    'overnight' => false,
+                    'history_limited' => true,
+                    'is_working_day' => null,
+                ];
+            }
+            if (! $rule->is_working_day) {
+                return [
+                    'start' => null,
+                    'end' => null,
+                    'source' => 'schedule_period',
+                    'valid' => false,
+                    'overnight' => false,
+                    'history_limited' => true,
+                    'is_working_day' => false,
+                ];
+            }
+            $start = $this->validTime($rule->start_time) ? substr((string) $rule->start_time, 0, 5) : null;
+            $end = $this->validTime($rule->end_time) ? substr((string) $rule->end_time, 0, 5) : null;
+            $hasValidTimes = $this->validTime($start) && $this->validTime($end);
+
+            return [
+                'start' => $hasValidTimes ? $start : null,
+                'end' => $hasValidTimes ? $end : null,
+                'source' => 'schedule_period',
+                'valid' => $hasValidTimes && $end > $start,
+                'overnight' => $hasValidTimes && $end <= $start,
+                'history_limited' => true,
+                'is_working_day' => true,
+            ];
+        }
 
         if ($calendar !== null && $calendar->is_working_day) {
             if ($this->validTime($calendar->start_time) && $this->validTime($calendar->end_time)) {
@@ -341,16 +475,23 @@ class AttendanceFingerprintPeriodReportService
                     : $categoryProfile;
             $profileRule = $profile?->rules->firstWhere('day_of_week', $dayOfWeek);
 
-            if (
-                $profileRule instanceof WorkScheduleProfileRule
-                && $profileRule->is_working_day
-                && $this->validTime($profileRule->start_time)
-                && $this->validTime($profileRule->end_time)
-            ) {
-                $start = substr((string) $profileRule->start_time, 0, 5);
-                $end = substr((string) $profileRule->end_time, 0, 5);
+            if ($profileRule instanceof WorkScheduleProfileRule) {
+                if (! $profileRule->is_working_day) {
+                    return [
+                        'start' => null,
+                        'end' => null,
+                        'source' => 'current_profile_rule',
+                        'valid' => false,
+                        'overnight' => false,
+                        'history_limited' => true,
+                        'is_working_day' => false,
+                    ];
+                }
+                $start = $this->validTime($profileRule->start_time) ? substr((string) $profileRule->start_time, 0, 5) : null;
+                $end = $this->validTime($profileRule->end_time) ? substr((string) $profileRule->end_time, 0, 5) : null;
                 $source = 'current_profile_rule';
                 $historyLimited = true;
+                $isWorkingDay = true;
             } elseif (
                 $profile !== null
                 && $profile->is_active
@@ -361,6 +502,7 @@ class AttendanceFingerprintPeriodReportService
                 $end = substr((string) $profile->end_time, 0, 5);
                 $source = 'current_profile_fallback';
                 $historyLimited = true;
+                $isWorkingDay = true;
             } elseif (
                 $this->validTime($employee->category->start_time)
                 && $this->validTime($employee->category->end_time)
@@ -373,13 +515,15 @@ class AttendanceFingerprintPeriodReportService
                     : null;
                 $source = 'current_category_fallback';
                 $historyLimited = true;
+                $isWorkingDay = true;
             }
         }
 
-        if (($start === null || $end === null) && $weekly !== null) {
+        if (($start === null || $end === null) && $weekly !== null && $source === null) {
             $start = $this->validTime($weekly->start_time) ? substr((string) $weekly->start_time, 0, 5) : null;
             $end = $this->validTime($weekly->end_time) ? substr((string) $weekly->end_time, 0, 5) : null;
             $source = 'weekly_schedule';
+            $isWorkingDay = (bool) $weekly->is_working_day;
         }
 
         $hasValidTimes = $this->validTime($start) && $this->validTime($end);
@@ -396,6 +540,7 @@ class AttendanceFingerprintPeriodReportService
             'valid' => $valid,
             'overnight' => $overnight,
             'history_limited' => $historyLimited,
+            'is_working_day' => $isWorkingDay,
         ];
     }
 
