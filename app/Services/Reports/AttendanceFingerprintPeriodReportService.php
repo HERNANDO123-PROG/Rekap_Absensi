@@ -3,9 +3,14 @@
 namespace App\Services\Reports;
 
 use App\Data\Reports\AttendanceFingerprintPeriodReportFilters;
+use App\Enums\AttendanceIntervalType;
+use App\Enums\AttendanceIntervalSource;
+use App\Enums\AttendanceStatus;
 use App\Enums\ImportBatchStatus;
+use App\Enums\LeaveApprovalStatus;
 use App\Enums\LeaveType;
 use App\Enums\MatchingStatus;
+use App\Models\AttendanceRecord;
 use App\Models\Employee;
 use App\Models\FingerprintLog;
 use App\Models\LeaveRequest;
@@ -52,6 +57,17 @@ class AttendanceFingerprintPeriodReportService
         $dates = $this->dates($filters);
         $logsByDate = $this->fingerprints($filters);
         $leavesByEmployeeDate = $this->leaveRequests($filters);
+        $attendanceByEmployeeDate = AttendanceRecord::query()
+            ->where('unit_id', $filters->unitId)
+            ->whereIn('employee_id', $employees->getCollection()->modelKeys())
+            ->whereBetween('attendance_date', [$filters->startDate, $filters->endDate])
+            ->whereNotNull('leave_request_id')
+            ->with('intervals')
+            ->get()
+            ->groupBy('employee_id')
+            ->map(fn (Collection $records) => $records->groupBy(
+                fn (AttendanceRecord $record): string => $record->attendance_date->format('Y-m-d'),
+            ));
         $calendarByDate = WorkCalendar::query()
             ->where('unit_id', $filters->unitId)
             ->whereBetween('date', [$filters->startDate, $filters->endDate])
@@ -146,6 +162,7 @@ class AttendanceFingerprintPeriodReportService
                 $dayStatuses,
                 $logsByDate,
                 $leavesByEmployeeDate,
+                $attendanceByEmployeeDate,
                 $calendarByDate,
                 $weeklyByDay,
                 $schedulePeriods,
@@ -196,7 +213,24 @@ class AttendanceFingerprintPeriodReportService
                         ->get($employee->id, collect())
                         ->get($date, collect());
                     $leaveTypes = $leaveRequests->pluck('leave_type')->unique()->values();
-                    $leaveUnverifiable = $leaveRequests->isNotEmpty();
+                    $attendanceRecords = $attendanceByEmployeeDate
+                        ->get($employee->id, collect())
+                        ->get($date, collect());
+                    $attendanceRecord = $attendanceRecords->count() === 1
+                        ? $attendanceRecords->first()
+                        : null;
+                    $verifiedManualLeave = $leaveRequests->count() === 1
+                        && $leaveRequests->first()->source === 'manual'
+                        && $leaveRequests->first()->approval_status === LeaveApprovalStatus::Confirmed
+                        && $attendanceRecord instanceof AttendanceRecord
+                        && $this->attendanceRecordConfirmsLeave(
+                            $attendanceRecord,
+                            $leaveRequests->first(),
+                            $employee->id,
+                            $filters->unitId,
+                            $date,
+                        );
+                    $leaveUnverifiable = $leaveRequests->isNotEmpty() && ! $verifiedManualLeave;
                     $schedule = $this->scheduleForDate(
                         $employee,
                         $date,
@@ -269,6 +303,29 @@ class AttendanceFingerprintPeriodReportService
                         $metrics['dinas'] = $leaveUnverifiable ? null : 0;
                     }
 
+                    if ($verifiedManualLeave) {
+                        $metrics['hadir'] = 0;
+                        $metrics['tidak_hadir'] = 0;
+                        $metrics['izin_keluar'] = 0;
+                        $metrics['dinas'] = 0;
+
+                        if ($attendanceRecord->status === AttendanceStatus::Absent) {
+                            $metrics['tidak_hadir'] = 1;
+                        } elseif ($attendanceRecord->status === AttendanceStatus::OfficialDuty) {
+                            $metrics['dinas'] = 1;
+                        } elseif ($leaveRequests->first()->leave_type === LeaveType::TemporaryExit) {
+                            $metrics['hadir'] = (int) $logs->isNotEmpty();
+                            $metrics['izin_keluar'] = 1;
+                        }
+                    }
+
+                    $leaveApprovalStatus = match (true) {
+                        $leaveRequests->isEmpty() => 'none',
+                        $leaveRequests->count() > 1 => 'conflict',
+                        $leaveRequests->first()->source !== 'manual' => 'import',
+                        default => $leaveRequests->first()->approval_status->value,
+                    };
+
                     $daily[] = [
                         'date' => $date,
                         'day_status' => $day['status'],
@@ -287,7 +344,10 @@ class AttendanceFingerprintPeriodReportService
                         'leave_types' => $leaveTypes->map(
                             fn (LeaveType $type): string => $type->value,
                         )->all(),
-                        'leave_status' => $leaveUnverifiable ? 'unverifiable' : 'none',
+                        'leave_approval_status' => $leaveApprovalStatus,
+                        'leave_status' => $verifiedManualLeave
+                            ? 'verified'
+                            : ($leaveUnverifiable ? 'unverifiable' : 'none'),
                         'metrics' => $metrics,
                         'reason_or_warning' => $this->warning(
                             $statusUnknown,
@@ -390,6 +450,39 @@ class AttendanceFingerprintPeriodReportService
             ->map(fn (Collection $requests) => $requests->groupBy(
                 fn (LeaveRequest $request): string => $request->request_date->format('Y-m-d'),
             ));
+    }
+
+    private function attendanceRecordConfirmsLeave(
+        AttendanceRecord $record,
+        LeaveRequest $leaveRequest,
+        int $employeeId,
+        int $unitId,
+        string $date,
+    ): bool {
+        if (
+            (int) $record->employee_id !== $employeeId
+            || (int) $record->unit_id !== $unitId
+            || $record->attendance_date->format('Y-m-d') !== $date
+            || (int) $record->leave_request_id !== (int) $leaveRequest->id
+            || $record->needs_verification
+            || $record->status === AttendanceStatus::NeedsVerification
+        ) {
+            return false;
+        }
+
+        return match ($leaveRequest->leave_type) {
+            LeaveType::Absent => $record->status === AttendanceStatus::Absent,
+            LeaveType::OfficialDuty => $record->status === AttendanceStatus::OfficialDuty,
+            LeaveType::TemporaryExit => in_array($record->status, [
+                AttendanceStatus::Late,
+                AttendanceStatus::EarlyDeparture,
+                AttendanceStatus::TemporaryExit,
+            ], true) && $record->intervals->contains(
+                fn ($interval): bool => $interval->type === AttendanceIntervalType::TemporaryExit
+                    && $interval->source === AttendanceIntervalSource::FingerprintAndLeaveRequest,
+            ),
+            default => false,
+        };
     }
 
     private function scheduleForDate(

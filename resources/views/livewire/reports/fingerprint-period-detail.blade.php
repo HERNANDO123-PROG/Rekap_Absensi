@@ -41,6 +41,7 @@
                             <th class="px-3 py-3">Izin Keluar</th>
                             <th class="px-3 py-3">Dinas</th>
                             <th class="px-3 py-3">Izin</th>
+                            <th class="px-3 py-3">Persetujuan</th>
                             <th class="px-3 py-3">Verifikasi</th>
                             <th class="px-3 py-3">Peringatan</th>
                         </tr>
@@ -70,6 +71,18 @@
                                     'ambiguous_missing_out_candidate' => 'Tidak ada kandidat pulang lain',
                                     'overnight_shift_undetermined' => 'Jadwal lintas tengah malam belum dapat dihitung',
                                     'schedule_unavailable' => 'Acuan jam kerja tidak tersedia',
+                                ];
+                                $approvalLabels = [
+                                    'none' => 'Tidak ada izin',
+                                    'pending' => 'Menunggu konfirmasi',
+                                    'confirmed' => 'Dikonfirmasi',
+                                    'import' => 'Data import',
+                                    'conflict' => 'Konflik',
+                                ];
+                                $verificationLabels = [
+                                    'none' => 'Tidak ada izin tercatat',
+                                    'verified' => 'Terverifikasi',
+                                    'unverifiable' => 'Belum terverifikasi',
                                 ];
                                 $warningLabels = [
                                     'Status hari belum dapat ditentukan.' => 'Tanggal belum dapat dipastikan karena kalender, jadwal rutin, atau bukti fingerprint belum cukup.',
@@ -112,7 +125,11 @@
                                 @endforeach
                                 <td class="px-3 py-3">{{ $day['leave_types'] === [] ? 'Tidak ada izin tercatat' : implode(', ', $day['leave_types']) }}</td>
                                 <td class="px-3 py-3">
-                                    {{ $day['leave_status'] === 'unverifiable' ? 'Belum terverifikasi' : 'Tidak ada izin tercatat' }}
+                                    {{ $approvalLabels[$day['leave_approval_status']] ?? $day['leave_approval_status'] }}
+                                    <code class="block text-xs text-slate-500">{{ $day['leave_approval_status'] }}</code>
+                                </td>
+                                <td class="px-3 py-3">
+                                    {{ $verificationLabels[$day['leave_status']] ?? $day['leave_status'] }}
                                     <code class="block text-xs text-slate-500">{{ $day['leave_status'] }}</code>
                                 </td>
                                 <td class="min-w-56 px-3 py-3">

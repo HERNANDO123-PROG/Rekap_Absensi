@@ -3,14 +3,21 @@
 namespace Tests\Feature;
 
 use App\Data\Reports\AttendanceFingerprintPeriodReportFilters;
+use App\Enums\AttendanceIntervalSource;
+use App\Enums\AttendanceStatus;
+use App\Enums\AttendanceIntervalType;
 use App\Enums\EmployeeStatus;
 use App\Enums\ImportBatchStatus;
+use App\Enums\LeaveApprovalStatus;
 use App\Enums\LeaveType;
 use App\Enums\MatchingStatus;
 use App\Enums\WorkCalendarType;
+use App\Models\AttendanceRecord;
+use App\Models\AttendanceInterval;
 use App\Models\Employee;
 use App\Models\FingerprintImportBatch;
 use App\Models\FingerprintLog;
+use App\Models\LeaveImportBatch;
 use App\Models\LeaveRequest;
 use App\Models\Unit;
 use App\Models\WorkCalendar;
@@ -339,6 +346,185 @@ class AttendanceFingerprintPeriodCalculationTest extends TestCase
         $this->assertNotNull($row['daily'][0]['reason_or_warning']);
     }
 
+    public function test_confirmed_manual_absence_and_duty_are_verified_without_fingerprint(): void
+    {
+        $unit = $this->unit();
+        $this->calendar($unit, '2026-09-01', true, '07:00', '15:00');
+        $absentEmployee = $this->employee($unit, 'Confirmed absent');
+        $dutyEmployee = $this->employee($unit, 'Confirmed duty');
+        $absentLeave = $this->manualLeave(
+            $unit,
+            $absentEmployee,
+            LeaveType::Absent,
+            '2026-09-01',
+            LeaveApprovalStatus::Confirmed,
+        );
+        $dutyLeave = $this->manualLeave(
+            $unit,
+            $dutyEmployee,
+            LeaveType::OfficialDuty,
+            '2026-09-01',
+            LeaveApprovalStatus::Confirmed,
+        );
+        $this->attendance($unit, $absentEmployee, $absentLeave, '2026-09-01', AttendanceStatus::Absent);
+        $this->attendance($unit, $dutyEmployee, $dutyLeave, '2026-09-01', AttendanceStatus::OfficialDuty);
+
+        $result = $this->report($unit);
+        $absentDay = collect($result['data'])->firstWhere('employee_id', $absentEmployee->id)['daily'][0];
+        $dutyDay = collect($result['data'])->firstWhere('employee_id', $dutyEmployee->id)['daily'][0];
+
+        $this->assertSame('no_fingerprint', $absentDay['candidate_status']);
+        $this->assertSame('confirmed', $absentDay['leave_approval_status']);
+        $this->assertSame('verified', $absentDay['leave_status']);
+        $this->assertSame(1, $absentDay['metrics']['tidak_hadir']);
+        $this->assertFalse($absentDay['is_ambiguous']);
+
+        $this->assertSame('no_fingerprint', $dutyDay['candidate_status']);
+        $this->assertSame('confirmed', $dutyDay['leave_approval_status']);
+        $this->assertSame('verified', $dutyDay['leave_status']);
+        $this->assertSame(1, $dutyDay['metrics']['dinas']);
+        $this->assertFalse($dutyDay['is_ambiguous']);
+    }
+
+    public function test_pending_manual_leave_is_not_verified_even_with_a_matching_attendance_record(): void
+    {
+        $unit = $this->unit();
+        $employee = $this->employee($unit, 'Pending duty');
+        $this->calendar($unit, '2026-09-01', true, '07:00', '15:00');
+        $leave = $this->manualLeave(
+            $unit,
+            $employee,
+            LeaveType::OfficialDuty,
+            '2026-09-01',
+            LeaveApprovalStatus::Pending,
+        );
+        $this->attendance($unit, $employee, $leave, '2026-09-01', AttendanceStatus::OfficialDuty);
+
+        $day = $this->report($unit)['data'][0]['daily'][0];
+
+        $this->assertSame('pending', $day['leave_approval_status']);
+        $this->assertSame('unverifiable', $day['leave_status']);
+        $this->assertSame(1, $day['metrics']['tidak_hadir']);
+        $this->assertNull($day['metrics']['dinas']);
+    }
+
+    public function test_confirmed_leave_with_a_mismatched_attendance_link_is_not_verified(): void
+    {
+        $unit = $this->unit();
+        $employee = $this->employee($unit, 'Mismatched attendance');
+        $this->calendar($unit, '2026-09-01', true, '07:00', '15:00');
+        $leaveForReportDate = $this->manualLeave(
+            $unit,
+            $employee,
+            LeaveType::Absent,
+            '2026-09-01',
+            LeaveApprovalStatus::Confirmed,
+        );
+        $otherDateLeave = $this->manualLeave(
+            $unit,
+            $employee,
+            LeaveType::Absent,
+            '2026-09-02',
+            LeaveApprovalStatus::Confirmed,
+        );
+        $this->attendance($unit, $employee, $otherDateLeave, '2026-09-01', AttendanceStatus::Absent);
+
+        $day = $this->report($unit)['data'][0]['daily'][0];
+
+        $this->assertNotSame($leaveForReportDate->id, $otherDateLeave->id);
+        $this->assertSame('confirmed', $day['leave_approval_status']);
+        $this->assertSame('unverifiable', $day['leave_status']);
+        $this->assertTrue($day['is_ambiguous']);
+    }
+
+    public function test_confirmed_temporary_exit_requires_a_fingerprint_backed_interval(): void
+    {
+        $unit = $this->unit();
+        $this->calendar($unit, '2026-09-01', true, '07:00', '15:00');
+        $verifiedEmployee = $this->employee($unit, 'Exit with evidence');
+        $unverifiedEmployee = $this->employee($unit, 'Exit without evidence');
+        $verifiedLeave = $this->manualLeave(
+            $unit,
+            $verifiedEmployee,
+            LeaveType::TemporaryExit,
+            '2026-09-01',
+            LeaveApprovalStatus::Confirmed,
+        );
+        $unverifiedLeave = $this->manualLeave(
+            $unit,
+            $unverifiedEmployee,
+            LeaveType::TemporaryExit,
+            '2026-09-01',
+            LeaveApprovalStatus::Confirmed,
+        );
+        $verifiedRecord = $this->attendance(
+            $unit,
+            $verifiedEmployee,
+            $verifiedLeave,
+            '2026-09-01',
+            AttendanceStatus::TemporaryExit,
+        );
+        $this->attendance(
+            $unit,
+            $unverifiedEmployee,
+            $unverifiedLeave,
+            '2026-09-01',
+            AttendanceStatus::TemporaryExit,
+        );
+        AttendanceInterval::query()->create([
+            'attendance_record_id' => $verifiedRecord->id,
+            'type' => AttendanceIntervalType::TemporaryExit,
+            'start_time' => '10:00',
+            'end_time' => '10:30',
+            'duration_minutes' => 30,
+            'source' => AttendanceIntervalSource::FingerprintAndLeaveRequest,
+        ]);
+
+        $result = $this->report($unit);
+        $verifiedDay = collect($result['data'])->firstWhere('employee_id', $verifiedEmployee->id)['daily'][0];
+        $unverifiedDay = collect($result['data'])->firstWhere('employee_id', $unverifiedEmployee->id)['daily'][0];
+
+        $this->assertSame('verified', $verifiedDay['leave_status']);
+        $this->assertSame(1, $verifiedDay['metrics']['izin_keluar']);
+        $this->assertSame('unverifiable', $unverifiedDay['leave_status']);
+        $this->assertNull($unverifiedDay['metrics']['izin_keluar']);
+    }
+
+    public function test_imported_leave_keeps_its_existing_unverifiable_report_behavior(): void
+    {
+        $unit = $this->unit();
+        $employee = $this->employee($unit, 'Imported leave');
+        $this->calendar($unit, '2026-09-01', true, '07:00', '15:00');
+        $batch = LeaveImportBatch::query()->create([
+            'unit_id' => $unit->id,
+            'filename' => 'leave.xlsx',
+            'file_hash' => hash('sha256', 'leave-import'),
+            'status' => ImportBatchStatus::Completed,
+            'total_rows' => 1,
+            'success_rows' => 1,
+        ]);
+        $leave = LeaveRequest::query()->create([
+            'import_batch_id' => $batch->id,
+            'source' => 'import',
+            'unit_id' => $unit->id,
+            'employee_id' => $employee->id,
+            'raw_name' => $employee->nama_lengkap,
+            'normalized_name' => strtolower($employee->nama_lengkap),
+            'request_date' => '2026-09-01',
+            'leave_type' => LeaveType::Absent,
+            'raw_leave_type' => LeaveType::Absent->value,
+            'matching_status' => MatchingStatus::Matched,
+            'approval_status' => LeaveApprovalStatus::Confirmed,
+        ]);
+        $this->attendance($unit, $employee, $leave, '2026-09-01', AttendanceStatus::Absent);
+
+        $day = $this->report($unit)['data'][0]['daily'][0];
+
+        $this->assertSame('import', $day['leave_approval_status']);
+        $this->assertSame('unverifiable', $day['leave_status']);
+        $this->assertTrue($day['is_ambiguous']);
+    }
+
     public function test_unmatched_or_incomplete_batch_logs_are_not_used_for_inference(): void
     {
         $unit = $this->unit();
@@ -431,6 +617,45 @@ class AttendanceFingerprintPeriodCalculationTest extends TestCase
                 'end_date' => '2026-09-01',
             ]),
         );
+    }
+
+    private function manualLeave(
+        Unit $unit,
+        Employee $employee,
+        LeaveType $type,
+        string $date,
+        LeaveApprovalStatus $approvalStatus,
+    ): LeaveRequest {
+        return LeaveRequest::query()->create([
+            'import_batch_id' => null,
+            'source' => 'manual',
+            'unit_id' => $unit->id,
+            'employee_id' => $employee->id,
+            'raw_name' => $employee->nama_lengkap,
+            'normalized_name' => strtolower($employee->nama_lengkap),
+            'request_date' => $date,
+            'leave_type' => $type,
+            'raw_leave_type' => $type->value,
+            'matching_status' => MatchingStatus::Matched,
+            'approval_status' => $approvalStatus,
+        ]);
+    }
+
+    private function attendance(
+        Unit $unit,
+        Employee $employee,
+        LeaveRequest $leave,
+        string $date,
+        AttendanceStatus $status,
+    ): AttendanceRecord {
+        return AttendanceRecord::query()->create([
+            'unit_id' => $unit->id,
+            'employee_id' => $employee->id,
+            'attendance_date' => $date,
+            'status' => $status,
+            'leave_request_id' => $leave->id,
+            'processed_at' => now(),
+        ]);
     }
 
     private function unit(): Unit

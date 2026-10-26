@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\LeaveApprovalStatus;
 use App\Http\Requests\StoreManualLeaveRequest;
 use App\Models\LeaveRequest;
 use App\Models\User;
@@ -34,7 +35,7 @@ class ManualLeaveRequestController extends Controller
             );
 
             return response()->json([
-                'message' => 'Data izin berhasil disimpan.',
+                'message' => 'Data izin berhasil disimpan dan menunggu konfirmasi.',
                 'data' => $this->responseData($result),
             ], 201);
         } catch (ManualLeaveRequestDuplicateException|ValidationException $exception) {
@@ -62,7 +63,9 @@ class ManualLeaveRequestController extends Controller
             );
 
             return response()->json([
-                'message' => 'Data izin berhasil diperbarui.',
+                'message' => $result['request']->approval_status === LeaveApprovalStatus::Pending
+                    ? 'Data izin berhasil diperbarui dan menunggu konfirmasi.'
+                    : 'Data izin berhasil diperbarui.',
                 'data' => $this->responseData($result),
             ]);
         } catch (ManualLeaveRequestDuplicateException|ValidationException $exception) {
@@ -71,6 +74,41 @@ class ManualLeaveRequestController extends Controller
             return $this->notFound($exception);
         } catch (Throwable $exception) {
             return $this->unexpectedFailure('update', $exception);
+        }
+    }
+
+    public function confirm(Request $request, LeaveRequest $leaveRequest): JsonResponse
+    {
+        try {
+            $user = $request->user();
+            if (! $user instanceof User) {
+                return response()->json(['message' => 'Unauthenticated.'], 401);
+            }
+
+            $result = $this->leaveRequests->confirm(
+                $leaveRequest->id,
+                $user,
+                $request->ip(),
+                $request->userAgent(),
+            );
+
+            $message = match ($result['attendance']['status'] ?? null) {
+                'skipped_ineligible_employee' => 'Izin dikonfirmasi, tetapi absensi tidak diproses karena karyawan tidak eligible: '
+                    .($result['attendance']['ineligibility_reason'] ?? 'alasan tidak tersedia.'),
+                'preserved_for_review' => 'Izin dikonfirmasi, tetapi absensi yang ada dipertahankan untuk peninjauan.',
+                default => 'Izin manual berhasil dikonfirmasi dan absensi diproses.',
+            };
+
+            return response()->json([
+                'message' => $message,
+                'data' => $this->responseData($result),
+            ]);
+        } catch (ManualLeaveRequestDuplicateException|ValidationException $exception) {
+            return $this->knownFailure($exception);
+        } catch (ModelNotFoundException $exception) {
+            return $this->notFound($exception);
+        } catch (Throwable $exception) {
+            return $this->unexpectedFailure('confirmation', $exception);
         }
     }
 
@@ -113,8 +151,12 @@ class ManualLeaveRequestController extends Controller
             'leave_type' => $leaveRequest->leave_type->value,
             'source' => $leaveRequest->source,
             'matching_status' => $leaveRequest->matching_status->value,
+            'approval_status' => $leaveRequest->approval_status->value,
+            'confirmed_by' => $leaveRequest->confirmed_by,
+            'confirmed_at' => $leaveRequest->confirmed_at?->toISOString(),
             'created_by' => $leaveRequest->created_by,
             'attendance_reprocessed' => $result['attendance_reprocessed'],
+            'attendance_status' => $result['attendance']['status'] ?? null,
         ];
     }
 

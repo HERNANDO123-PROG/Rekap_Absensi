@@ -3,15 +3,16 @@
 namespace App\Services\Leave;
 
 use App\Enums\EmployeeStatus;
+use App\Enums\LeaveApprovalStatus;
 use App\Enums\LeaveType;
 use App\Enums\MatchingStatus;
-use App\Models\AuditLog;
 use App\Models\AttendanceRecord;
+use App\Models\AuditLog;
 use App\Models\Employee;
 use App\Models\LeaveRequest;
 use App\Models\User;
-use App\Services\NameNormalizer;
 use App\Services\Attendance\AttendanceProcessingService;
+use App\Services\NameNormalizer;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -69,6 +70,9 @@ class ManualLeaveRequestService
                 'attachment' => null,
                 'matching_status' => MatchingStatus::Matched,
                 'absence_reason' => null,
+                'approval_status' => LeaveApprovalStatus::Pending,
+                'confirmed_by' => null,
+                'confirmed_at' => null,
             ]);
 
             AuditLog::query()->create([
@@ -89,12 +93,7 @@ class ManualLeaveRequestService
 
             return [
                 'request' => $leaveRequest,
-                'attendance_reprocessed' => $this->reprocessIfPreviouslyProcessed(
-                    $employee->unit_id,
-                    $employee->id,
-                    $attributes['request_date'],
-                    $user->id,
-                ),
+                'attendance_reprocessed' => false,
             ];
         });
     }
@@ -143,9 +142,15 @@ class ManualLeaveRequestService
             $oldUnitId = $leaveRequest->unit_id;
             $oldEmployeeId = $leaveRequest->employee_id;
             $oldDate = $leaveRequest->request_date->format('Y-m-d');
+            $oldLeaveType = $leaveRequest->leave_type;
+            $oldApprovalStatus = $leaveRequest->approval_status;
             $this->assertNoDuplicate($targetEmployee->id, $attributes['request_date'], $leaveRequest->id);
             $leaveType = LeaveType::from($attributes['leave_type']);
             $name = $targetEmployee->displayName();
+            $substantiveChange = $oldUnitId !== $targetEmployee->unit_id
+                || $oldEmployeeId !== $targetEmployee->id
+                || $oldDate !== $attributes['request_date']
+                || $oldLeaveType !== $leaveType;
 
             $leaveRequest->fill([
                 'unit_id' => $targetEmployee->unit_id,
@@ -159,16 +164,26 @@ class ManualLeaveRequestService
                 'matching_status' => MatchingStatus::Matched,
                 'absence_reason' => null,
             ]);
+            if ($substantiveChange && $oldApprovalStatus === LeaveApprovalStatus::Confirmed) {
+                $leaveRequest->fill([
+                    'approval_status' => LeaveApprovalStatus::Pending,
+                    'confirmed_by' => null,
+                    'confirmed_at' => null,
+                ]);
+            }
             $leaveRequest->save();
 
             $this->audit($user, 'leave.manual.updated', $leaveRequest, [
                 'old_unit_id' => $oldUnitId,
                 'old_employee_id' => $oldEmployeeId,
                 'old_request_date' => $oldDate,
+                'old_leave_type' => $oldLeaveType->value,
+                'old_approval_status' => $oldApprovalStatus->value,
                 'unit_id' => $targetEmployee->unit_id,
                 'employee_id' => $targetEmployee->id,
                 'request_date' => $attributes['request_date'],
                 'leave_type' => $leaveType->value,
+                'approval_status' => $leaveRequest->approval_status->value,
             ], $ipAddress, $userAgent);
 
             $reprocessed = $this->reprocessIfPreviouslyProcessed($oldUnitId, $oldEmployeeId, $oldDate, $user->id);
@@ -184,6 +199,52 @@ class ManualLeaveRequestService
             }
 
             return ['request' => $leaveRequest, 'attendance_reprocessed' => $reprocessed];
+        });
+    }
+
+    /** @return array{request: LeaveRequest, attendance_reprocessed: bool, attendance: array|null} */
+    public function confirm(
+        int $leaveRequestId,
+        User $user,
+        ?string $ipAddress,
+        ?string $userAgent,
+    ): array {
+        return DB::transaction(function () use ($leaveRequestId, $user, $ipAddress, $userAgent): array {
+            $leaveRequest = LeaveRequest::query()->lockForUpdate()->findOrFail($leaveRequestId);
+            $this->assertManual($leaveRequest);
+            if ($leaveRequest->approval_status !== LeaveApprovalStatus::Pending) {
+                throw ValidationException::withMessages([
+                    'approval_status' => 'Izin manual ini sudah dikonfirmasi.',
+                ]);
+            }
+
+            $leaveRequest->fill([
+                'approval_status' => LeaveApprovalStatus::Confirmed,
+                'confirmed_by' => $user->id,
+                'confirmed_at' => now(),
+            ])->save();
+
+            $this->audit($user, 'leave.manual.confirmed', $leaveRequest, [
+                'unit_id' => $leaveRequest->unit_id,
+                'employee_id' => $leaveRequest->employee_id,
+                'request_date' => $leaveRequest->request_date->format('Y-m-d'),
+                'leave_type' => $leaveRequest->leave_type->value,
+                'approval_status' => $leaveRequest->approval_status->value,
+            ], $ipAddress, $userAgent);
+
+            $attendance = $this->attendance->processEmployeeDate(
+                $leaveRequest->unit_id,
+                $leaveRequest->employee_id,
+                $leaveRequest->request_date->format('Y-m-d'),
+                $user->id,
+            );
+
+            return [
+                'request' => $leaveRequest,
+                'attendance_reprocessed' => ! ($attendance['status'] === 'skipped_ineligible_employee'
+                    || ($attendance['preserved_for_review'] ?? false)),
+                'attendance' => $attendance,
+            ];
         });
     }
 
@@ -213,21 +274,20 @@ class ManualLeaveRequestService
             $unitId = $leaveRequest->unit_id;
             $employeeId = $leaveRequest->employee_id;
             $date = $leaveRequest->request_date->format('Y-m-d');
+            $wasConfirmed = $leaveRequest->approval_status === LeaveApprovalStatus::Confirmed;
             $this->audit($user, 'leave.manual.deleted', $leaveRequest, [
                 'unit_id' => $unitId,
                 'employee_id' => $employeeId,
                 'request_date' => $date,
                 'leave_type' => $leaveRequest->leave_type->value,
+                'approval_status' => $leaveRequest->approval_status->value,
             ], $ipAddress, $userAgent);
             $leaveRequest->delete();
 
             return [
-                'attendance_reprocessed' => $this->reprocessIfPreviouslyProcessed(
-                    $unitId,
-                    $employeeId,
-                    $date,
-                    $user->id,
-                ),
+                'attendance_reprocessed' => $wasConfirmed
+                    ? $this->reprocessIfPreviouslyProcessed($unitId, $employeeId, $date, $user->id)
+                    : false,
             ];
         });
     }

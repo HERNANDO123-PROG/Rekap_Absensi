@@ -65,6 +65,7 @@ class AttendanceProcessingService
             ->where('employee_id', $employeeId)
             ->whereDate('request_date', $date)
             ->where('matching_status', MatchingStatus::Matched->value)
+            ->eligibleForAttendance()
             ->orderBy('id')
             ->get();
 
@@ -123,6 +124,7 @@ class AttendanceProcessingService
                 ->whereDate('request_date', $dateValue)
                 ->whereNotNull('employee_id')
                 ->where('matching_status', MatchingStatus::Matched->value)
+                ->eligibleForAttendance()
                 ->orderBy('id')
                 ->get()
                 ->groupBy('employee_id');

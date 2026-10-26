@@ -63,7 +63,7 @@ class AttendanceFingerprintPeriodExportService
             'Sumber Jadwal', 'Masuk Terpilih', 'Pulang Terpilih', 'Status Kandidat',
             'Jumlah Log', 'Timestamp Unik', 'Hari Kerja', 'Total Finger', 'Hadir',
             'Terlambat', 'Pulang Awal', 'Tidak Hadir', 'Izin Keluar', 'Dinas',
-            'Jenis Izin', 'Status Izin', 'Alasan/Peringatan',
+            'Jenis Izin', 'Status Persetujuan', 'Status Verifikasi', 'Alasan/Peringatan',
         ];
         $this->writeRow($dailySheet, 1, $dailyHeaders);
         $dailyRow = 2;
@@ -97,6 +97,7 @@ class AttendanceFingerprintPeriodExportService
                     $this->display($metrics['izin_keluar']),
                     $this->display($metrics['dinas']),
                     implode(', ', $day['leave_types']),
+                    $day['leave_approval_status'],
                     $day['leave_status'],
                     $day['reason_or_warning'] ?? '',
                 ]);
@@ -112,9 +113,9 @@ class AttendanceFingerprintPeriodExportService
             $sheet->freezePane($sheet === $summarySheet ? 'A7' : 'A2');
         }
         $summarySheet->getStyle('A6:P6')->getFont()->setBold(true);
-        $dailySheet->getStyle('A1:AB1')->getFont()->setBold(true);
+        $dailySheet->getStyle('A1:AC1')->getFont()->setBold(true);
         $summarySheet->setAutoFilter('A6:P'.max(6, $summarySheet->getHighestRow()));
-        $dailySheet->setAutoFilter('A1:AB'.max(1, $dailySheet->getHighestRow()));
+        $dailySheet->setAutoFilter('A1:AC'.max(1, $dailySheet->getHighestRow()));
 
         return $spreadsheet;
     }

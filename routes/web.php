@@ -92,6 +92,9 @@ Route::post('/leave-requests/manual', [ManualLeaveRequestController::class, 'sto
 Route::put('/leave-requests/manual/{leaveRequest}', [ManualLeaveRequestController::class, 'update'])
     ->middleware('auth')
     ->name('leave-requests.manual.update');
+Route::post('/leave-requests/manual/{leaveRequest}/confirm', [ManualLeaveRequestController::class, 'confirm'])
+    ->middleware('auth')
+    ->name('leave-requests.manual.confirm');
 Route::delete('/leave-requests/manual/{leaveRequest}', [ManualLeaveRequestController::class, 'destroy'])
     ->middleware('auth')
     ->name('leave-requests.manual.destroy');

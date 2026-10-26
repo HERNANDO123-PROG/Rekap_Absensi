@@ -101,7 +101,7 @@
                     <button type="submit" class="rounded-xl bg-cyan-700 px-4 py-2.5 text-sm font-medium text-white hover:bg-cyan-800 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2">Simpan</button>
                     <button type="reset" class="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2">Reset</button>
                 </div>
-                <p data-manual-leave-form-status role="status" aria-live="polite" class="text-sm text-slate-600">Data akan disimpan setelah backend mengonfirmasi.</p>
+                <p data-manual-leave-form-status role="status" aria-live="polite" class="text-sm text-slate-600">Izin manual baru menunggu konfirmasi sebelum dihitung dalam rekap.</p>
             </form>
         </section>
 
@@ -122,11 +122,13 @@
                                 <th class="px-3 py-3">Tanggal</th>
                                 <th class="px-3 py-3">Karyawan</th>
                                 <th class="px-3 py-3">Jenis izin</th>
+                                <th class="px-3 py-3">Status</th>
                                 <th class="px-3 py-3">Tindakan</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-100">
                             @foreach ($manualLeaveRequests as $manualLeaveRequest)
+                                @php($isConfirmed = $manualLeaveRequest->approval_status === \App\Enums\LeaveApprovalStatus::Confirmed)
                                 <tr>
                                     <td class="whitespace-nowrap px-3 py-3 text-slate-700">{{ $manualLeaveRequest->request_date->format('Y-m-d') }}</td>
                                     <td class="px-3 py-3">
@@ -134,6 +136,13 @@
                                         <span class="block text-xs text-slate-500">NIP: {{ $manualLeaveRequest->employee?->nip ?? '—' }}</span>
                                     </td>
                                     <td class="whitespace-nowrap px-3 py-3 text-slate-700">{{ $manualLeaveRequest->raw_leave_type }}</td>
+                                    <td class="whitespace-nowrap px-3 py-3">
+                                        @if ($isConfirmed)
+                                            <span class="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">Terkonfirmasi</span>
+                                        @else
+                                            <span class="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-700">Menunggu konfirmasi</span>
+                                        @endif
+                                    </td>
                                     <td class="whitespace-nowrap px-3 py-3">
                                         <button
                                             type="button"
@@ -146,7 +155,18 @@
                                             data-request-date="{{ $manualLeaveRequest->request_date->format('Y-m-d') }}"
                                             data-leave-type="{{ $manualLeaveRequest->leave_type->value }}"
                                             class="rounded-lg border border-cyan-200 px-3 py-1.5 text-xs font-medium text-cyan-800 hover:bg-cyan-50"
-                                        >Perbaiki</button>
+                                        >Edit</button>
+                                        @if (! $isConfirmed)
+                                            <button
+                                                type="button"
+                                                data-manual-leave-confirm
+                                                data-endpoint="{{ route('leave-requests.manual.confirm', $manualLeaveRequest) }}"
+                                                data-confirm="Konfirmasi izin manual untuk {{ $manualLeaveRequest->employee?->displayName() ?? $manualLeaveRequest->raw_name }} tanggal {{ $manualLeaveRequest->request_date->format('Y-m-d') }}?"
+                                                class="ml-1 rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+                                            >Konfirmasi</button>
+                                        @else
+                                            <span class="ml-1 inline-flex rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-medium text-emerald-700">Terkonfirmasi</span>
+                                        @endif
                                         <button
                                             type="button"
                                             data-manual-leave-delete

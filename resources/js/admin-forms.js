@@ -822,28 +822,57 @@ document.addEventListener('click', (event) => {
     const editButton = event.target.closest('[data-manual-leave-edit]');
     if (editButton) {
         const form = document.querySelector('form[data-manual-leave-form]');
-        form.reset();
+        const unitSelect = form.querySelector('[name="unit_id"]');
+        const employeeIdInput = form.querySelector('[data-manual-leave-employee-id]');
+        const employeeSearch = form.querySelector('#manual-leave-employee-search');
+        const requestDate = form.querySelector('[name="request_date"]');
+        const leaveType = form.querySelector('[name="leave_type"]');
+
+        unitSelect.value = '';
+        employeeIdInput.value = '';
+        employeeSearch.value = '';
+        requestDate.value = '';
+        leaveType.value = '';
+        clearManualLeaveErrors(form);
+        clearManualLeaveResults(form);
+
         form.dataset.manualLeaveId = editButton.dataset.id;
-        form.querySelector('[name="unit_id"]').value = editButton.dataset.unitId;
-        form.querySelector('[data-manual-leave-employee-id]').value = editButton.dataset.employeeId;
-        form.querySelector('#manual-leave-employee-search').value =
+        unitSelect.value = editButton.dataset.unitId;
+        employeeIdInput.value = editButton.dataset.employeeId;
+        employeeSearch.value =
             `${editButton.dataset.employeeName} — NIP: ${editButton.dataset.employeeNip || '—'}`;
-        form.querySelector('[name="request_date"]').value = editButton.dataset.requestDate;
-        form.querySelector('[name="leave_type"]').value = editButton.dataset.leaveType;
+        requestDate.value = editButton.dataset.requestDate;
+        leaveType.value = editButton.dataset.leaveType;
         form.querySelector('[data-manual-leave-search-status]').textContent = 'Karyawan dipilih.';
         form.querySelector('[data-manual-leave-search-status]').classList.remove('text-rose-700', 'text-slate-600');
         form.querySelector('[data-manual-leave-search-status]').classList.add('text-emerald-700');
-        form.querySelector('button[type="submit"]').textContent = 'Perbarui izin';
-        form.querySelector('#manual-leave-unit').dispatchEvent(new Event('change', { bubbles: true }));
-        form.querySelector('[data-manual-leave-employee-id]').value = editButton.dataset.employeeId;
-        form.querySelector('#manual-leave-employee-search').value =
-            `${editButton.dataset.employeeName} — NIP: ${editButton.dataset.employeeNip || '—'}`;
-        form.querySelector('[data-manual-leave-search-status]').textContent = 'Karyawan dipilih.';
-        form.querySelector('[data-manual-leave-search-status]').classList.remove('text-slate-600');
-        form.querySelector('[data-manual-leave-search-status]').classList.add('text-emerald-700');
-        form.querySelector('[data-manual-leave-form-status]').textContent = 'Perbaiki data lalu simpan perubahan.';
+        form.querySelector('button[type="submit"]').textContent = 'Simpan perubahan';
+        form.querySelector('[data-manual-leave-form-status]').textContent = 'Mode edit aktif: perbarui data izin lalu simpan.';
         form.scrollIntoView({ behavior: 'smooth', block: 'center' });
         form.querySelector('#manual-leave-employee-search').focus();
+        return;
+    }
+
+    const confirmButton = event.target.closest('[data-manual-leave-confirm]');
+    if (confirmButton) {
+        if (!window.confirm(confirmButton.dataset.confirm)) return;
+        confirmButton.disabled = true;
+        fetch(confirmButton.dataset.endpoint, {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+            },
+        })
+            .then(async (response) => {
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(responseMessage(payload, response));
+                window.location.reload();
+            })
+            .catch((error) => {
+                window.alert(error.message || 'Izin manual tidak dapat dikonfirmasi. Coba lagi.');
+                confirmButton.disabled = false;
+            });
         return;
     }
 
@@ -918,13 +947,16 @@ document.addEventListener('submit', (event) => {
     const endpoint = manualLeaveId
         ? form.dataset.manualLeaveUpdateTemplate.replace('__ID__', encodeURIComponent(manualLeaveId))
         : form.dataset.manualLeaveEndpoint;
+    const formData = new FormData(form);
+    if (manualLeaveId) formData.append('_method', 'PUT');
+
     fetch(endpoint, {
-        method: manualLeaveId ? 'PUT' : 'POST',
+        method: 'POST',
         headers: {
             Accept: 'application/json',
             'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
         },
-        body: new FormData(form),
+        body: formData,
     })
         .then(async (response) => {
             const payload = await response.json().catch(() => ({}));
@@ -980,7 +1012,7 @@ document.addEventListener('reset', (event) => {
 
     const status = form.querySelector('[data-manual-leave-form-status]');
     if (status) {
-        status.textContent = 'Data akan disimpan setelah backend mengonfirmasi.';
+        status.textContent = 'Izin manual baru menunggu konfirmasi sebelum dihitung dalam rekap.';
         status.classList.remove('text-amber-700', 'text-emerald-700', 'text-rose-700');
         status.classList.add('text-slate-600');
     }

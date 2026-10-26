@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\EmployeeStatus;
 use App\Enums\ImportBatchStatus;
+use App\Enums\LeaveApprovalStatus;
 use App\Enums\LeaveType;
 use App\Enums\MatchingStatus;
 use App\Enums\WorkCalendarType;
@@ -128,6 +129,7 @@ class FingerprintPeriodIntegrationTest extends TestCase
             'leave_type' => LeaveType::TemporaryExit,
             'raw_leave_type' => LeaveType::TemporaryExit->value,
             'matching_status' => MatchingStatus::Matched,
+            'approval_status' => LeaveApprovalStatus::Pending,
         ]);
         $this->fingerprints($unit, $employee, '2026-09-01', ['07:10', '14:55']);
         $this->actingAs(User::factory()->create());
@@ -149,6 +151,9 @@ class FingerprintPeriodIntegrationTest extends TestCase
             ->assertSee('14:55')
             ->assertSee('Kandidat masuk dan pulang dipilih')
             ->assertSee('selected')
+            ->assertSee('Persetujuan')
+            ->assertSee('Menunggu konfirmasi')
+            ->assertSee('Verifikasi')
             ->assertSee('Acuan jam kerja tidak lengkap')
             ->assertSee('Izin belum terverifikasi')
             ->assertSee('Izin belum terverifikasi karena cakupan atau persetujuannya tidak dapat dipastikan dari data yang tersedia.')
@@ -220,6 +225,9 @@ class FingerprintPeriodIntegrationTest extends TestCase
             $this->assertSame(107, $summary->getHighestRow());
             $this->assertSame(102, $daily->getHighestRow());
             $this->assertSame('Belum dapat ditentukan', $daily->getCell('R2')->getValue());
+            $this->assertSame('Status Persetujuan', $daily->getCell('AA1')->getValue());
+            $this->assertSame('Status Verifikasi', $daily->getCell('AB1')->getValue());
+            $this->assertSame('Alasan/Peringatan', $daily->getCell('AC1')->getValue());
             $this->assertNotSame($excluded->id, $summary->getCell('B107')->getValue());
         } finally {
             unlink($path);

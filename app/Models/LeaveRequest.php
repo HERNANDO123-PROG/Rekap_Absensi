@@ -3,8 +3,10 @@
 namespace App\Models;
 
 use App\Enums\AbsenceReason;
+use App\Enums\LeaveApprovalStatus;
 use App\Enums\LeaveType;
 use App\Enums\MatchingStatus;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -31,6 +33,9 @@ class LeaveRequest extends Model
         'attachment',
         'matching_status',
         'absence_reason',
+        'approval_status',
+        'confirmed_by',
+        'confirmed_at',
     ];
 
     protected function casts(): array
@@ -40,7 +45,17 @@ class LeaveRequest extends Model
             'leave_type' => LeaveType::class,
             'matching_status' => MatchingStatus::class,
             'absence_reason' => AbsenceReason::class,
+            'approval_status' => LeaveApprovalStatus::class,
+            'confirmed_at' => 'datetime',
         ];
+    }
+
+    public function scopeEligibleForAttendance(Builder $query): Builder
+    {
+        return $query->where(function (Builder $query): void {
+            $query->where('source', '!=', 'manual')
+                ->orWhere('approval_status', LeaveApprovalStatus::Confirmed->value);
+        });
     }
 
     public function importBatch(): BelongsTo
@@ -51,6 +66,11 @@ class LeaveRequest extends Model
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function confirmedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'confirmed_by');
     }
 
     public function unit(): BelongsTo
