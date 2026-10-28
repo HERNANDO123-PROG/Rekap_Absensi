@@ -60,7 +60,7 @@ class AttendanceFingerprintPeriodCalculationTest extends TestCase
         $this->assertSame('working', $row['daily'][0]['day_status']);
         $this->assertSame('calendar', $row['daily'][0]['source']);
         $this->assertSame(1, $row['hari_kerja']);
-        $this->assertSame(2, $row['total_finger']);
+        $this->assertSame(0, $row['total_finger']);
         $this->assertSame(1, $row['tidak_hadir']);
     }
 
@@ -228,6 +228,7 @@ class AttendanceFingerprintPeriodCalculationTest extends TestCase
         $day = $this->report($unit)['data'][0]['daily'][0];
 
         $this->assertSame(1, $day['metrics']['hadir']);
+        $this->assertSame(1, $day['metrics']['total_finger']);
         $this->assertSame('07:10', $day['selected_in']);
         $this->assertNull($day['selected_out']);
         $this->assertSame(1, $day['metrics']['terlambat']);

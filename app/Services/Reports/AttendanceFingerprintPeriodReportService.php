@@ -267,7 +267,8 @@ class AttendanceFingerprintPeriodReportService
 
                     $metrics = [
                         'hari_kerja' => $statusUnknown ? null : (int) $isWorking,
-                        'total_finger' => $statusUnknown ? null : ($isWorking ? 2 : 0),
+                        // Jumlah scan nyata (kelompok 2 menit), maksimal 2 per hari: masuk + pulang.
+                        'total_finger' => $statusUnknown ? null : ($isWorking ? min($scanResult['distinct_count'], 2) : 0),
                         'hadir' => null,
                         'terlambat' => null,
                         'pulang_awal' => null,
@@ -645,7 +646,10 @@ class AttendanceFingerprintPeriodReportService
             $minutes = $this->minutes($time);
             $lastIndex = array_key_last($groups);
             if ($lastIndex === null || $minutes - $groups[$lastIndex]['minutes'] > 2) {
-                $groups[] = ['time' => $time, 'minutes' => $minutes];
+                $groups[] = ['time' => $time, 'minutes' => $minutes, 'last_time' => $time, 'last_minutes' => $minutes,];
+            } else {
+                $groups[$lastIndex]['last_time'] = $time;        // baru
+                $groups[$lastIndex]['last_minutes'] = $minutes;  // baru
             }
         }
 
@@ -702,31 +706,30 @@ class AttendanceFingerprintPeriodReportService
             if ($distanceIn < $distanceOut) {
                 $result['selected_in'] = $scan['time'];
                 $result['late'] = (int) ($scan['minutes'] > $start);
+                $result['early'] = 1;
             } else {
-                $result['selected_out'] = $scan['time'];
-                $result['early'] = (int) ($scan['minutes'] < $end);
-            }
+                 $result['selected_out'] = $scan['time'];
+                 $result['early'] = (int) ($scan['minutes'] < $end);
++                // Satu-satunya scan adalah scan pulang, berarti pegawai tidak finger masuk:
++                // dihitung terlambat.
++                $result['late'] = 1;
+             }
             $result['candidate_status'] = 'single_scan_assigned';
 
             return $result;
         }
 
-        $inCandidates = $this->rankCandidates($groups, $start);
-        $selectedIn = $inCandidates[0];
-        $outCandidates = $this->rankCandidates($groups, $end);
-        $outCandidates = array_values(array_filter(
-            $outCandidates,
-            fn (int $candidate): bool => $candidate !== $selectedIn,
-        ));
+                // Dua scan atau lebih: masuk = scan paling awal, pulang = scan paling akhir.
+        $firstGroup = $groups[0];
+        $lastGroup = $groups[array_key_last($groups)];
 
-        $result['selected_in'] = $groups[$selectedIn]['time'];
-        $result['late'] = (int) ($groups[$selectedIn]['minutes'] > $start);
-        if ($outCandidates === []) {
-            $result['candidate_status'] = 'ambiguous_missing_out_candidate';
-            $result['is_ambiguous'] = true;
+        $result['selected_in'] = $firstGroup['time'];
+        $result['late'] = (int) ($firstGroup['minutes'] > $start);
+        $result['selected_out'] = $lastGroup['last_time'];
+        $result['early'] = (int) ($lastGroup['last_minutes'] < $end);
+        $result['candidate_status'] = 'selected';
 
-            return $result;
-        }
+        return $result;
 
         $result['selected_out'] = $groups[$outCandidates[0]]['time'];
         $result['early'] = (int) ($groups[$outCandidates[0]]['minutes'] < $end);
