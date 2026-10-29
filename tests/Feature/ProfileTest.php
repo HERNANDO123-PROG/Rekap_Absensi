@@ -31,8 +31,7 @@ class ProfileTest extends TestCase
         $this->actingAs($user);
 
         $component = Volt::test('profile.update-profile-information-form')
-            ->set('name', 'Test User')
-            ->set('email', 'test@example.com')
+            ->set('name', 'test_user_renamed')
             ->call('updateProfileInformation');
 
         $component
@@ -41,27 +40,23 @@ class ProfileTest extends TestCase
 
         $user->refresh();
 
-        $this->assertSame('Test User', $user->name);
-        $this->assertSame('test@example.com', $user->email);
-        $this->assertNull($user->email_verified_at);
+        $this->assertSame('test_user_renamed', $user->name);
     }
 
-    public function test_email_verification_status_is_unchanged_when_the_email_address_is_unchanged(): void
+    public function test_username_must_be_unique_when_updated(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['name' => 'existing_user']);
+        $otherUser = User::factory()->create();
 
         $this->actingAs($user);
 
         $component = Volt::test('profile.update-profile-information-form')
-            ->set('name', 'Test User')
-            ->set('email', $user->email)
+            ->set('name', $otherUser->name)
             ->call('updateProfileInformation');
 
-        $component
-            ->assertHasNoErrors()
-            ->assertNoRedirect();
+        $component->assertHasErrors(['name']);
 
-        $this->assertNotNull($user->refresh()->email_verified_at);
+        $this->assertSame('existing_user', $user->refresh()->name);
     }
 
     public function test_user_can_delete_their_account(): void

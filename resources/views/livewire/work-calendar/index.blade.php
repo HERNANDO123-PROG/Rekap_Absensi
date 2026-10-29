@@ -43,13 +43,13 @@
         </div>
     </x-slot>
 
-    <div class="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div class="app-panel mb-5 p-4">
         <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Periode kalender</p>
                 <h3 class="mt-1 text-lg font-semibold text-slate-900">{{ $selectedDate->translatedFormat('F Y') }}</h3>
             </div>
-            <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-2">
                 <a href="{{ route('work-calendar.index', ['month' => $previousMonth->format('Y-m'), 'unit_id' => $unitId]) }}" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Sebelumnya</a>
                 <a href="{{ route('work-calendar.index', ['month' => $nextMonth->format('Y-m'), 'unit_id' => $unitId]) }}" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Berikutnya</a>
                 <form method="GET" action="{{ route('work-calendar.index') }}" class="flex items-center gap-2">
@@ -60,19 +60,19 @@
                             <option value="{{ $unit->id }}" @selected((string) $unitId === (string) $unit->id)>{{ $unit->code }}</option>
                         @endforeach
                     </select>
-                    <button class="rounded-lg border border-slate-300 px-3 py-2 text-sm">Filter</button>
+                    <button class="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">Filter</button>
                 </form>
             </div>
         </div>
     </div>
 
-    <div class="mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div class="grid grid-cols-7 border-b border-slate-200 bg-slate-50 text-center text-xs font-semibold uppercase text-slate-500">
+    <div class="calendar-shell mb-6">
+        <div class="calendar-grid border-b border-slate-200 bg-slate-50 text-center text-xs font-semibold uppercase text-slate-500">
             @foreach (['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'] as $weekday)
                 <div class="py-3">{{ $weekday }}</div>
             @endforeach
         </div>
-        <div class="grid grid-cols-7">
+        <div class="calendar-grid">
             @foreach ($calendarDays as $day)
                 @php
                     $dayEntries = $calendarEntries->get($day->format('Y-m-d'), collect());
@@ -90,22 +90,24 @@
                     ) && $period->start_date->lessThanOrEqualTo($day) && $period->end_date->greaterThanOrEqualTo($day));
                     $hasNationalEvent = $nationalEvents->contains(fn ($event) => $event->date->format('Y-m-d') === $day->format('Y-m-d'));
                 @endphp
-                <div class="min-h-24 border-b border-r border-slate-100 p-2 {{ $day->month !== $selectedDate->month ? 'bg-slate-50 text-slate-400' : '' }}">
-                    <div class="flex items-start justify-between">
-                        <span class="text-sm font-semibold {{ $day->isToday() ? 'text-cyan-700' : 'text-slate-800' }}">{{ $day->day }}</span>
+                <div class="calendar-day {{ $day->month !== $selectedDate->month ? 'is-outside-month' : '' }} {{ $day->isToday() ? 'is-today' : '' }}">
+                    <div class="calendar-day__header">
+                        <span class="calendar-day__number {{ $day->isToday() ? 'bg-cyan-100 text-cyan-700' : 'bg-slate-100 text-slate-700' }}">{{ $day->day }}</span>
                         @if ($day->month === $selectedDate->month)
-                            <span class="rounded-full px-2 py-0.5 text-[10px] font-semibold {{ $isWorking === null ? 'bg-slate-100 text-slate-500' : ($isWorking ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600') }}">{{ $isWorking === null ? 'Pilih unit' : ($isWorking ? 'Kerja rutin' : 'Libur rutin') }}</span>
+                            <span class="calendar-day__badge {{ $isWorking === null ? 'bg-slate-100 text-slate-500' : ($isWorking ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600') }}">{{ $isWorking === null ? 'Pilih unit' : ($isWorking ? 'Kerja' : 'Libur') }}</span>
                         @endif
                     </div>
-                    <div class="mt-1 space-y-1">
+                    <div class="calendar-day__items">
                         @foreach ($dayEntries as $entry)
-                            <p class="truncate rounded bg-pink-50 px-1.5 py-1 text-[10px] font-medium text-pink-700">{{ $entry->title ?: $entry->type->value }}{{ $entry->unit ? ' · '.$entry->unit->code : '' }}</p>
+                            <span class="calendar-day__item {{ $entry->type->value === 'holiday' ? 'calendar-day__item--holiday' : (($entry->type->value === 'special_event' || $entry->type->value === 'special_workday') ? 'calendar-day__item--special' : 'calendar-day__item--work') }}">
+                                {{ $entry->title ?: $entry->type->value }}{{ $entry->unit ? ' · '.$entry->unit->code : '' }}
+                            </span>
                         @endforeach
                         @if ($hasRamadan)
-                            <p class="truncate rounded bg-violet-50 px-1.5 py-1 text-[10px] font-medium text-violet-700">Jadwal periode</p>
+                            <span class="calendar-day__item calendar-day__item--special">Jadwal periode</span>
                         @endif
                         @if ($hasNationalEvent)
-                            <p class="truncate rounded bg-amber-50 px-1.5 py-1 text-[10px] font-medium text-amber-700">Kandidat nasional</p>
+                            <span class="calendar-day__item calendar-day__item--holiday">Kandidat nasional</span>
                         @endif
                     </div>
                 </div>

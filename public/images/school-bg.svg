@@ -1,0 +1,37 @@
+﻿<svg width="1600" height="1200" viewBox="0 0 1600 1200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="sky" x1="800" y1="0" x2="800" y2="1200" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#DFF5FF"/>
+      <stop offset="0.4" stop-color="#B9E4F4"/>
+      <stop offset="1" stop-color="#8AB9D5"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0F4C81" stop-opacity="0.8"/>
+      <stop offset="1" stop-color="#0F766E" stop-opacity="0.7"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="1200" fill="url(#sky)"/>
+  <circle cx="1300" cy="180" r="120" fill="#FFF7CC" fill-opacity="0.7"/>
+  <path d="M0 940C180 860 260 840 380 860C520 884 590 955 740 960C930 968 1020 870 1140 868C1290 866 1410 920 1600 1008V1200H0V940Z" fill="#A8D8B5" fill-opacity="0.72"/>
+  <path d="M0 1000C120 970 220 960 330 980C480 1006 570 1074 760 1082C930 1088 1080 1050 1340 1022C1460 1008 1534 1010 1600 1024V1200H0V1000Z" fill="#6FAE8F" fill-opacity="0.62"/>
+  <g opacity="0.82">
+    <rect x="210" y="420" width="1180" height="470" rx="14" fill="url(#glass)"/>
+    <rect x="267" y="468" width="160" height="152" rx="8" fill="#D5F4FF" fill-opacity="0.2"/>
+    <rect x="455" y="468" width="160" height="152" rx="8" fill="#D5F4FF" fill-opacity="0.2"/>
+    <rect x="643" y="468" width="160" height="152" rx="8" fill="#D5F4FF" fill-opacity="0.2"/>
+    <rect x="831" y="468" width="160" height="152" rx="8" fill="#D5F4FF" fill-opacity="0.2"/>
+    <rect x="1019" y="468" width="160" height="152" rx="8" fill="#D5F4FF" fill-opacity="0.2"/>
+    <rect x="1207" y="468" width="120" height="152" rx="8" fill="#D5F4FF" fill-opacity="0.2"/>
+    <rect x="390" y="660" width="820" height="160" rx="8" fill="#EAF8FF" fill-opacity="0.16"/>
+    <rect x="534" y="690" width="154" height="110" rx="6" fill="#F6FDFF" fill-opacity="0.14"/>
+    <rect x="710" y="690" width="154" height="110" rx="6" fill="#F6FDFF" fill-opacity="0.14"/>
+    <rect x="886" y="690" width="154" height="110" rx="6" fill="#F6FDFF" fill-opacity="0.14"/>
+    <path d="M160 880H1440L1380 1010H220L160 880Z" fill="#EAF7FE" fill-opacity="0.34"/>
+    <path d="M260 420V300H1340V420" stroke="#F0FAFF" stroke-opacity="0.5" stroke-width="10" stroke-linecap="round"/>
+    <path d="M290 300L800 180L1310 300" stroke="#F1FBFF" stroke-opacity="0.38" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <g opacity="0.8">
+    <path d="M80 1030H1520" stroke="#B9E3F6" stroke-width="8" stroke-linecap="round" stroke-opacity="0.35"/>
+    <path d="M150 1080H1450" stroke="#C7EAFD" stroke-width="6" stroke-linecap="round" stroke-opacity="0.22"/>
+  </g>
+</svg>
