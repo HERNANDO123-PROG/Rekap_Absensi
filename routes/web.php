@@ -65,6 +65,7 @@ Route::middleware('auth')->prefix('employees')->name('employees.')->group(functi
     Route::post('/', [EmployeeController::class, 'store'])->name('store');
     Route::get('/{employee}', [EmployeeController::class, 'show'])->name('show');
     Route::put('/{employee}', [EmployeeController::class, 'update'])->name('update');
+    Route::delete('/{employee}', [EmployeeController::class, 'destroy'])->name('destroy');
     Route::post('/{employee}/activate', [EmployeeController::class, 'activate'])->name('activate');
     Route::post('/{employee}/deactivate', [EmployeeController::class, 'deactivate'])->name('deactivate');
     Route::post('/{employee}/aliases', [EmployeeAliasController::class, 'store'])->name('aliases.store');

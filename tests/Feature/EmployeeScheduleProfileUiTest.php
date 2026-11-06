@@ -16,7 +16,7 @@ class EmployeeScheduleProfileUiTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_employee_table_separates_category_and_schedule_and_shows_unassigned_profile(): void
+    public function test_employee_table_shows_category_without_schedule_column(): void
     {
         $category = $this->createCategory('Staff');
         $employee = $this->createEmployee($category);
@@ -29,11 +29,11 @@ class EmployeeScheduleProfileUiTest extends TestCase
         $headers = substr($html, $headerStart, $headerEnd - $headerStart);
 
         $this->assertStringContainsString('>Kategori</th>', $headers);
-        $this->assertStringContainsString('>Jam Kerja</th>', $headers);
+        $this->assertStringNotContainsString('>Jam Kerja</th>', $headers);
         $this->assertStringNotContainsString('Kategori / Jam Kerja', $headers);
-        $this->assertStringContainsString('Belum dipilih', $html);
-        $this->assertStringContainsString('data-schedule-profile-select', $html);
-        $this->assertStringContainsString('name="work_schedule_profile_id"', $html);
+        $this->assertStringNotContainsString('Belum dipilih', $html);
+        $this->assertStringNotContainsString('data-schedule-profile-select', $html);
+        $this->assertStringNotContainsString('name="work_schedule_profile_id"', $html);
         $this->assertDatabaseHas('employees', [
             'id' => $employee->id,
             'work_schedule_profile_id' => null,
@@ -60,22 +60,14 @@ class EmployeeScheduleProfileUiTest extends TestCase
 
         $html = $this->get(route('employees.manage'))->assertOk()->getContent();
 
-        $this->assertStringContainsString('data-category-id="'.$staff->id.'"', $html);
-        $this->assertStringContainsString('value="'.$normal->id.'" data-category-id="'.$staff->id.'"', $html);
-        $this->assertStringContainsString('value="'.$semester->id.'"', $html);
-        $this->assertStringNotContainsString('value="'.$other->id.'" data-category-id="'.$staff->id.'"', $html);
-        $this->assertStringNotContainsString('value="'.$this->profileIdByName($staff, 'Inactive profile').'" data-category-id="'.$staff->id.'"', $html);
+        $this->assertStringNotContainsString('Inactive profile', $html);
         $this->assertStringNotContainsString('Incomplete profile', $html);
-        $this->assertMatchesRegularExpression(
-            '/value="'.$semester->id.'"\\s+data-category-id="'.$staff->id.'"\\s+selected/s',
-            $html,
-        );
         $this->assertSame($staff->id, $employee->fresh()->category_id);
         $this->assertSame($semester->id, $employee->fresh()->work_schedule_profile_id);
 
         $createCategorySelect = substr($html, strpos($html, 'id="employee-category"'), 600);
         $this->assertStringContainsString('data-schedule-category-select', $createCategorySelect);
-        $this->assertStringContainsString('disabled', substr($html, strpos($html, 'id="employee-work-profile"'), 240));
+        $this->assertStringNotContainsString('id="employee-work-profile"', $html);
     }
 
     public function test_mass_profile_actions_remain_disabled_and_readiness_is_global_not_filter_scoped(): void
@@ -93,13 +85,9 @@ class EmployeeScheduleProfileUiTest extends TestCase
             'search' => 'No matching employee',
         ]))->assertOk()->getContent();
 
-        $this->assertMatchesRegularExpression('/<button\b(?=[^>]*\bdisabled\b)[^>]*>.*?Terapkan Normal.*?<\/button>/s', $html);
-        $this->assertMatchesRegularExpression('/<button\b(?=[^>]*\bdisabled\b)[^>]*>.*?Terapkan Liburan Semester.*?<\/button>/s', $html);
-        $this->assertStringContainsString('cakupan penerapan belum disetujui', mb_strtolower($html));
-        $this->assertStringContainsString('Ready Category', $html);
-        $this->assertStringContainsString('Inactive Category (Nonaktif)', $html);
-        $this->assertStringContainsString('data-ready-employee-count="1"', $html);
-        $this->assertStringContainsString('Kategori nonaktif dikecualikan dari cakupan penerapan.', $html);
+        $this->assertStringNotContainsString('Terapkan Normal', $html);
+        $this->assertStringNotContainsString('Terapkan Liburan Semester', $html);
+        $this->assertStringNotContainsString('cakupan penerapan belum disetujui', mb_strtolower($html));
         $this->assertDatabaseHas('employees', [
             'id' => $readyEmployee->id,
             'work_schedule_profile_id' => null,
@@ -124,11 +112,8 @@ class EmployeeScheduleProfileUiTest extends TestCase
 
         $html = $this->get(route('employees.manage'))->assertOk()->getContent();
 
-        $this->assertMatchesRegularExpression('/<button\b(?![^>]*\bdisabled\b)[^>]*data-target="normal"[^>]*>.*?Terapkan Normal.*?<\/button>/s', $html);
-        $this->assertMatchesRegularExpression('/<button\b(?=[^>]*\bdisabled\b)[^>]*data-target="liburan-semester"[^>]*>.*?Terapkan Liburan Semester.*?<\/button>/s', $html);
-        $this->assertStringContainsString('Masih ada 1 kategori aktif yang belum memiliki profil Liburan Semester valid.', $html);
-        $this->assertStringContainsString('Kategori nonaktif dikecualikan dari cakupan penerapan.', $html);
-        $this->assertStringContainsString('Inactive Category (Nonaktif)', $html);
+        $this->assertStringNotContainsString('Terapkan Normal', $html);
+        $this->assertStringNotContainsString('Terapkan Liburan Semester', $html);
     }
 
     public function test_readiness_details_are_in_a_separate_dialog_and_do_not_start_preview(): void
@@ -140,21 +125,9 @@ class EmployeeScheduleProfileUiTest extends TestCase
         $this->actingAs(User::factory()->create());
 
         $html = $this->get(route('employees.manage'))->assertOk()->getContent();
-        $dialogStart = strpos($html, '<dialog id="mass-profile-readiness-dialog"');
-        $dialogEnd = strpos($html, '</dialog>', $dialogStart);
-        $dialog = substr($html, $dialogStart, $dialogEnd - $dialogStart);
-
-        $this->assertNotFalse($dialogStart);
-        $this->assertNotFalse($dialogEnd);
-        $this->assertStringContainsString('Lihat Detail Kesiapan', $html);
-        $this->assertStringContainsString('Detail Kesiapan Profil', $dialog);
-        $this->assertStringContainsString('data-readiness-target="Normal"', $dialog);
-        $this->assertStringContainsString('data-readiness-target="Liburan Semester"', $dialog);
-        $this->assertStringContainsString('Ready Details Category', $dialog);
-        $this->assertStringContainsString('Excluded Details Category (Nonaktif)', $dialog);
-        $this->assertStringContainsString('Dikecualikan', $dialog);
-        $this->assertStringNotContainsString('data-mass-profile-preview', $dialog);
-        $this->assertStringContainsString('Membukanya tidak memulai pratinjau atau penerapan.', $dialog);
+        $this->assertStringNotContainsString('id="mass-profile-readiness-dialog"', $html);
+        $this->assertStringNotContainsString('Lihat Detail Kesiapan', $html);
+        $this->assertStringNotContainsString('Detail Kesiapan Profil', $html);
     }
 
     public function test_mass_profile_confirmation_dialog_is_available_only_for_an_explicit_test_scope(): void
@@ -168,11 +141,10 @@ class EmployeeScheduleProfileUiTest extends TestCase
 
         $html = $this->get(route('employees.manage'))->assertOk()->getContent();
 
-        $this->assertMatchesRegularExpression('/<button\b(?![^>]*\bdisabled\b)[^>]*data-target="normal"[^>]*>.*?Terapkan Normal.*?<\/button>/s', $html);
-        $this->assertMatchesRegularExpression('/<button\b(?![^>]*\bdisabled\b)[^>]*data-target="liburan-semester"[^>]*>.*?Terapkan Liburan Semester.*?<\/button>/s', $html);
-        $this->assertStringContainsString('id="mass-profile-dialog"', $html);
-        $this->assertStringContainsString('data-mass-profile-confirm', $html);
-        $this->assertStringContainsString('Snapshot jadwal pada absensi historis tidak diubah langsung', $html);
+        $this->assertStringNotContainsString('id="mass-profile-dialog"', $html);
+        $this->assertStringNotContainsString('data-mass-profile-confirm', $html);
+        $this->assertStringNotContainsString('Terapkan Normal', $html);
+        $this->assertStringNotContainsString('Terapkan Liburan Semester', $html);
     }
 
     public function test_employee_can_create_and_update_with_active_matching_profile_and_null_is_allowed(): void
@@ -226,11 +198,8 @@ class EmployeeScheduleProfileUiTest extends TestCase
 
         $html = $this->get(route('employees.manage'))->assertOk()->getContent();
 
-        $this->assertStringContainsString('Normal (Nonaktif)', $html);
-        $this->assertStringContainsString(
-            'value="'.$profile->id.'" data-category-id="'.$category->id.'" data-selectable="false" disabled selected',
-            $html,
-        );
+        $this->assertStringNotContainsString('Normal (Nonaktif)', $html);
+        $this->assertStringNotContainsString('name="work_schedule_profile_id"', $html);
 
         $this->putJson(route('employees.update', $employee), [
             'nama_lengkap' => 'Unrelated edit',

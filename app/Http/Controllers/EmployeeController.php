@@ -168,4 +168,13 @@ class EmployeeController extends Controller
     {
         return response()->json(['data' => $this->employees->deactivate($employee)]);
     }
+
+    public function destroy(Employee $employee): JsonResponse
+    {
+        $this->employees->delete($employee);
+
+        return response()->json([
+            'message' => 'Pegawai berhasil dihapus.',
+        ], 200);
+    }
 }

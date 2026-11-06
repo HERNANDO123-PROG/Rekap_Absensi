@@ -31,6 +31,61 @@ class EmployeeManagementTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_employee_can_be_deleted_permanently_from_employee_management_page(): void
+    {
+        $unit = Unit::create(['name' => 'SD', 'code' => 'SD']);
+        $employee = Employee::create([
+            'unit_id' => $unit->id,
+            'fingerprint_id' => 'DELETE-001',
+            'nama_lengkap' => 'Pegawai Dihapus',
+            'status' => EmployeeStatus::Inactive,
+        ]);
+        $this->actingAs(User::factory()->create());
+
+        $this->get(route('employees.manage'))
+            ->assertOk()
+            ->assertSee(route('employees.destroy', $employee), false)
+            ->assertSee('Hapus');
+
+        $this->deleteJson(route('employees.destroy', $employee))
+            ->assertOk()
+            ->assertJsonPath('message', 'Pegawai berhasil dihapus.');
+
+        $this->assertDatabaseMissing('employees', ['id' => $employee->id]);
+    }
+
+    public function test_delete_button_only_appears_for_inactive_employees(): void
+    {
+        $unit = Unit::create(['name' => 'SD', 'code' => 'SD']);
+        $activeEmployee = Employee::create([
+            'unit_id' => $unit->id,
+            'fingerprint_id' => 'ACTIVE-VISIBLE-001',
+            'nama_lengkap' => 'Pegawai Aktif',
+            'status' => EmployeeStatus::Active,
+        ]);
+        $inactiveEmployee = Employee::create([
+            'unit_id' => $unit->id,
+            'fingerprint_id' => 'INACTIVE-VISIBLE-001',
+            'nama_lengkap' => 'Pegawai Nonaktif',
+            'status' => EmployeeStatus::Inactive,
+        ]);
+        $this->actingAs(User::factory()->create());
+
+        $html = $this->get(route('employees.manage'))->assertOk()->getContent();
+        $inactiveForm = 'data-endpoint="'.route('employees.destroy', $inactiveEmployee).'" data-method="DELETE"';
+        $activeForm = 'data-endpoint="'.route('employees.destroy', $activeEmployee).'" data-method="DELETE"';
+
+        $activeRowStart = strpos($html, 'Pegawai Aktif');
+        $inactiveRowStart = strpos($html, 'Pegawai Nonaktif');
+        $activeRowEnd = strpos($html, '</tr>', $activeRowStart);
+        $inactiveRowEnd = strpos($html, '</tr>', $inactiveRowStart);
+        $activeRow = substr($html, $activeRowStart, $activeRowEnd - $activeRowStart);
+        $inactiveRow = substr($html, $inactiveRowStart, $inactiveRowEnd - $inactiveRowStart);
+
+        $this->assertStringNotContainsString($activeForm, $activeRow);
+        $this->assertStringContainsString($inactiveForm, $inactiveRow);
+    }
+
     public function test_employees_store_fingerprint_and_admin_names_separately(): void
     {
         $tk = $this->createUnit('TK');

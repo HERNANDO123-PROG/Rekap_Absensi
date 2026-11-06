@@ -184,6 +184,14 @@ class EmployeeService
         return $this->update($employee, ['status' => EmployeeStatus::Inactive]);
     }
 
+    public function delete(Employee $employee): void
+    {
+        DB::transaction(function () use ($employee): void {
+            $employee->attendanceRecords()->delete();
+            $employee->delete();
+        });
+    }
+
     public function findByFingerprint(int $unitId, string $fingerprintId): ?Employee
     {
         return Employee::query()

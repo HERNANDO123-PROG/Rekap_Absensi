@@ -9,7 +9,7 @@
                 </nav>
                 <p class="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-600">Master data</p>
                 <h2 class="mt-1 text-2xl font-bold text-slate-900">Kelola Pegawai</h2>
-                <p class="mt-1 max-w-3xl text-sm text-slate-600">Kelola data pegawai dan profil jam kerja sesuai kebijakan yang berlaku.</p>
+                <p class="mt-1 max-w-3xl text-sm text-slate-600">Kelola data pegawai dan kategori penugasan sesuai kebijakan yang berlaku.</p>
             </div>
             <span class="shrink-0 rounded-full bg-cyan-100 px-3 py-1 text-xs font-semibold text-cyan-700">{{ \App\Models\Employee::query()->count() }} data</span>
         </div>
@@ -21,7 +21,7 @@
             @foreach ([
                 ['label' => 'Pegawai aktif', 'count' => \App\Models\Employee::query()->where('status', \App\Enums\EmployeeStatus::Active->value)->count(), 'icon' => 'users', 'color' => 'cyan'],
                 ['label' => 'Pegawai nonaktif', 'count' => \App\Models\Employee::query()->where('status', \App\Enums\EmployeeStatus::Inactive->value)->count(), 'icon' => 'user-minus', 'color' => 'slate'],
-                ['label' => 'Alias tersedia', 'count' => \App\Models\EmployeeAlias::query()->count(), 'icon' => 'tag', 'color' => 'slate'],
+                ['label' => 'Kategori', 'count' => $categories->count(), 'icon' => 'tag', 'color' => 'slate'],
             ] as $stat)
                 <div class="flex min-w-0 items-center gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                     <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl {{ $stat['color'] === 'cyan' ? 'bg-cyan-50 text-cyan-700' : 'bg-slate-100 text-slate-600' }}" aria-hidden="true">
@@ -41,6 +41,7 @@
             @endforeach
         </div>
 
+        @if(false)
         <section class="min-w-0 overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-sm" aria-labelledby="mass-profile-readiness-title">
             <div class="flex min-w-0 flex-col gap-4 border-b border-blue-100 bg-blue-50/50 p-5 sm:flex-row sm:items-center sm:justify-between">
                 <div class="flex min-w-0 items-start gap-3">
@@ -241,6 +242,7 @@
             </div>
         </dialog>
 
+        @endif
         <section class="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
             <h3 class="text-lg font-semibold text-slate-900">Tambah pegawai</h3>
             <form data-api-form data-endpoint="{{ route('employees.store') }}" data-reload-on-success="true" class="mt-4 grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -256,17 +258,6 @@
                         <option value="">Pilih kategori</option>
                         @foreach ($activeCategories as $category)
                             <option value="{{ $category->id }}" data-category-active="true">{{ $category->name }}</option>
-                        @endforeach
-                    </select>
-                </div>
-                <div>
-                    <label for="employee-work-profile" class="mb-1 block text-sm font-medium text-slate-700">Jam Kerja</label>
-                    <select id="employee-work-profile" name="work_schedule_profile_id" data-schedule-profile-select class="w-full rounded-lg border-slate-300 text-sm" disabled>
-                        <option value="">Belum dipilih</option>
-                        @foreach ($activeCategories as $category)
-                            @foreach ($selectableProfiles->get($category->id, collect()) as $profile)
-                                <option value="{{ $profile->id }}" data-category-id="{{ $category->id }}" hidden>{{ $profile->name }}</option>
-                            @endforeach
                         @endforeach
                     </select>
                 </div>
@@ -292,7 +283,7 @@
                     </select>
                 </div>
                 <div>
-                    <label for="employee-filter-category" class="mb-1 block text-sm font-medium text-slate-700">Kategori Jam Kerja</label>
+                    <label for="employee-filter-category" class="mb-1 block text-sm font-medium text-slate-700">Kategori</label>
                     <select id="employee-filter-category" name="category_id" class="w-full rounded-lg border-slate-300 text-sm">
                         <option value="">Semua Kategori</option>
                         @foreach ($categories as $category)
@@ -324,7 +315,6 @@
                             <th class="min-w-56 px-4 py-3 font-medium">Nama Fingerprint</th>
                             <th class="px-4 py-3 font-medium">Jabatan</th>
                             <th class="px-4 py-3 font-medium">Kategori</th>
-                            <th class="px-4 py-3 font-medium">Jam Kerja</th>
                             <th class="px-4 py-3 font-medium">NIP</th>
                             <th class="px-4 py-3 font-medium">Unit</th>
                             <th class="px-4 py-3 font-medium">Status</th>
@@ -364,39 +354,6 @@
                                         @endforeach
                                     </select>
                                 </td>
-                                <td class="min-w-48 px-4 py-3">
-                                    @if ($employee->workScheduleProfile)
-                                        <span data-edit-view class="text-sm font-medium text-slate-800">
-                                            {{ $employee->workScheduleProfile->name }}{{ $employee->workScheduleProfile->is_active ? '' : ' (Nonaktif)' }}
-                                        </span>
-                                    @else
-                                        <span data-edit-view class="text-sm text-slate-500">Belum dipilih</span>
-                                    @endif
-                                    <select
-                                        form="employee-edit-{{ $employee->id }}"
-                                        data-edit-input
-                                        data-schedule-profile-select
-                                        name="work_schedule_profile_id"
-                                        aria-label="Jam kerja untuk {{ $employee->displayName() }}"
-                                        class="hidden w-full rounded-lg border-slate-300 px-2 py-1.5 text-xs"
-                                        disabled
-                                    >
-                                        <option value="">Belum dipilih</option>
-                                        @if ($employee->workScheduleProfile && $employee->category_id !== null && ! $selectableProfiles->get($employee->category_id, collect())->contains(fn ($profile) => (int) $profile->id === (int) $employee->work_schedule_profile_id))
-                                            <option value="{{ $employee->work_schedule_profile_id }}" data-category-id="{{ $employee->category_id }}" data-selectable="false" disabled selected>{{ $employee->workScheduleProfile->name }} (tersimpan, tidak dapat dipilih)</option>
-                                        @endif
-                                        @foreach ($activeCategories as $category)
-                                            @foreach ($selectableProfiles->get($category->id, collect()) as $profile)
-                                                <option
-                                                    value="{{ $profile->id }}"
-                                                    data-category-id="{{ $category->id }}"
-                                                    @if ((int) $employee->category_id !== (int) $category->id) hidden @endif
-                                                    @selected((int) $employee->work_schedule_profile_id === (int) $profile->id)
-                                                >{{ $profile->name }}</option>
-                                            @endforeach
-                                        @endforeach
-                                    </select>
-                                </td>
                                 <td class="min-w-44 px-4 py-3 text-slate-600">
                                     <span data-edit-view>{{ $employee->nip ?: '—' }}</span>
                                     <input form="employee-edit-{{ $employee->id }}" data-edit-input name="nip" value="{{ $employee->nip }}" maxlength="255" aria-label="NIP untuk {{ $employee->displayName() }}" placeholder="—" class="hidden w-full rounded-lg border-slate-300 px-2 py-1.5 text-sm" disabled>
@@ -428,6 +385,10 @@
                                             <form data-edit-hide data-api-form data-endpoint="{{ route('employees.activate', $employee) }}" data-reload-on-success="true" data-confirm="Aktifkan {{ $employee->displayName() }}? Sistem akan memeriksa konflik ID fingerprint." class="inline">
                                                 <button type="submit" class="rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">Aktifkan</button>
                                                 <p data-form-status class="w-full text-xs text-slate-600" role="status" aria-live="polite"></p>
+                                            </form>
+                                            <form data-edit-hide data-api-form data-endpoint="{{ route('employees.destroy', $employee) }}" data-method="DELETE" data-reload-on-success="true" data-confirm="Hapus permanen {{ $employee->displayName() }} beserta data absensi terkait? Tindakan ini tidak dapat dibatalkan." class="inline">
+                                                <button type="submit" class="rounded-lg border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50">Hapus</button>
+                                                <p data-form-status class="sr-only" role="status" aria-live="polite"></p>
                                             </form>
                                         @endif
                                     </div>
