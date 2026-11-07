@@ -230,7 +230,13 @@ class AttendanceFingerprintPeriodReportService
                             $filters->unitId,
                             $date,
                         );
-                    $leaveUnverifiable = $leaveRequests->isNotEmpty() && ! $verifiedManualLeave;
+                    $verifiedImportedLeave = $leaveRequests->count() === 1
+                        && $leaveRequests->first()->source === 'import'
+                        && $leaveRequests->first()->import_batch_id !== null
+                        && $leaveRequests->first()->importBatch?->status === ImportBatchStatus::Completed;
+                    $leaveUnverifiable = $leaveRequests->isNotEmpty()
+                        && ! $verifiedManualLeave
+                        && ! $verifiedImportedLeave;
                     $schedule = $this->scheduleForDate(
                         $employee,
                         $date,
@@ -318,6 +324,20 @@ class AttendanceFingerprintPeriodReportService
                             $metrics['hadir'] = (int) $logs->isNotEmpty();
                             $metrics['izin_keluar'] = 1;
                         }
+                    } elseif ($verifiedImportedLeave) {
+                        $metrics['hadir'] = 0;
+                        $metrics['tidak_hadir'] = 0;
+                        $metrics['izin_keluar'] = 0;
+                        $metrics['dinas'] = 0;
+
+                        if ($leaveRequests->first()->leave_type === LeaveType::Absent) {
+                            $metrics['tidak_hadir'] = 1;
+                        } elseif ($leaveRequests->first()->leave_type === LeaveType::OfficialDuty) {
+                            $metrics['dinas'] = 1;
+                        } elseif ($leaveRequests->first()->leave_type === LeaveType::TemporaryExit) {
+                            $metrics['hadir'] = (int) $logs->isNotEmpty();
+                            $metrics['izin_keluar'] = 1;
+                        }
                     }
 
                     $leaveApprovalStatus = match (true) {
@@ -346,7 +366,7 @@ class AttendanceFingerprintPeriodReportService
                             fn (LeaveType $type): string => $type->value,
                         )->all(),
                         'leave_approval_status' => $leaveApprovalStatus,
-                        'leave_status' => $verifiedManualLeave
+                        'leave_status' => $verifiedManualLeave || $verifiedImportedLeave
                             ? 'verified'
                             : ($leaveUnverifiable ? 'unverifiable' : 'none'),
                         'metrics' => $metrics,

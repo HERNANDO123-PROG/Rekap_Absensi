@@ -2,6 +2,7 @@
 
 namespace App\Services\Attendance;
 
+use App\Enums\AbsenceReason;
 use App\Enums\AttendanceStatus;
 use App\Enums\LeaveType;
 
@@ -45,7 +46,9 @@ class AttendanceStatusResolver
                 $status = AttendanceStatus::OfficialDuty;
             } elseif ($leaveType === LeaveType::Absent->value) {
                 $absenceReason = $leaveRequest->absence_reason?->value;
-                $status = AttendanceStatus::Absent;
+                $status = $absenceReason === AbsenceReason::Sick->value
+                    ? AttendanceStatus::Sick
+                    : AttendanceStatus::Permission;
             } elseif ($schedule['missing_schedule'] || $schedule['invalid_schedule'] || ($schedule['missing_category'] ?? false)) {
                 $needsVerification = true;
                 $verificationNote = match (true) {

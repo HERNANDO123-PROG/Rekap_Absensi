@@ -30,6 +30,7 @@ class LeaveFormRowParser
         }
 
         $rawName = $this->value($row, $mapping, 'raw_name', 'raw');
+        $rawNip = $this->value($row, $mapping, 'nip', 'raw');
         $positionValue = $this->value($row, $mapping, 'position', 'value');
         $rawDate = $this->value($row, $mapping, 'request_date', 'raw');
         $dateValue = $this->value($row, $mapping, 'request_date', 'value');
@@ -42,6 +43,13 @@ class LeaveFormRowParser
 
         if (! is_string($rawName) || trim($rawName) === '') {
             $errors[] = 'Nama Lengkap dan Gelar wajib diisi.';
+        }
+
+        $nip = is_string($rawNip) ? trim($rawNip) : '';
+        if ($nip === '') {
+            $errors[] = 'NIP wajib diisi.';
+        } elseif (mb_strlen($nip, 'UTF-8') > 64) {
+            $errors[] = 'NIP tidak boleh lebih dari 64 karakter.';
         }
 
         if (! is_string($positionValue) || trim($positionValue) === '') {
@@ -88,6 +96,7 @@ class LeaveFormRowParser
 
         return [
             'source_row' => $sourceRow,
+            'nip' => $nip,
             'raw_name' => is_string($rawName) ? $rawName : '',
             'normalized_name' => $normalizedName,
             'position' => is_string($positionValue) ? trim($positionValue) : null,

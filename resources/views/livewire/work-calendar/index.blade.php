@@ -5,13 +5,6 @@
     $previousMonth = $selectedDate->copy()->subMonth();
     $unitId = request('unit_id');
     $units = \App\Models\Unit::query()->whereIn('code', ['TK', 'SD'])->orderBy('code')->get();
-    $categories = \App\Models\WorkScheduleCategory::query()->with('profiles.rules')->orderBy('name')->get();
-    $periods = \App\Models\WorkSchedulePeriod::query()
-        ->with(['unit', 'category', 'profile'])
-        ->where('is_active', true)
-        ->whereDate('start_date', '<=', $selectedDate->copy()->endOfMonth())
-        ->whereDate('end_date', '>=', $selectedDate)
-        ->get();
     $calendarEntries = \App\Models\WorkCalendar::query()
         ->with('unit')
         ->whereBetween('date', [$selectedDate->format('Y-m-01'), $selectedDate->copy()->endOfMonth()->format('Y-m-d')])
@@ -19,9 +12,27 @@
         ->orderBy('date')
         ->get()
         ->groupBy(fn ($entry) => $entry->date->format('Y-m-d'));
-    $nationalEvents = \App\Models\NationalCalendarEvent::query()
-        ->where('country_code', config('services.nager_date.country', 'ID'))
+    $agendaEntries = \App\Models\WorkCalendar::query()
+        ->with('unit')
         ->whereYear('date', $selectedDate->year)
+        ->when($unitId, fn ($query) => $query->where('unit_id', $unitId))
+        ->orderBy('date')
+        ->get();
+    $groupCalendarEntries = fn ($entries) => $entries->groupBy(fn ($entry) => json_encode([
+        $entry->date->format('Y-m-d'),
+        $entry->national_calendar_event_id,
+        $entry->type->value,
+        $entry->title,
+        $entry->description,
+        $entry->is_working_day,
+        $entry->start_time,
+        $entry->end_time,
+    ], JSON_THROW_ON_ERROR));
+    $agendaGroups = $groupCalendarEntries($agendaEntries);
+    $nationalEvents = \App\Models\NationalCalendarEvent::query()
+        ->where('country_code', 'ID')
+        ->whereYear('date', $selectedDate->year)
+        ->withCount('workCalendarEntries')
         ->orderBy('date')
         ->get();
     $calendarDays = [];
@@ -39,35 +50,40 @@
                 <p class="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-600">Kalender</p>
                 <h2 class="mt-1 text-2xl font-bold text-slate-900">Kalender Kerja</h2>
             </div>
-            <div class="flex items-center gap-2"><span class="rounded-full bg-pink-100 px-3 py-1 text-xs font-semibold text-pink-700">{{ \App\Models\WorkCalendar::query()->count() }} agenda</span><a href="{{ route('work-schedule.index') }}" class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Jadwal Mingguan</a></div>
+            <div class="flex items-center gap-2">
+                <span class="rounded-full bg-cyan-50 px-3 py-1.5 text-xs font-semibold text-cyan-800">{{ $agendaGroups->count() }} agenda</span>
+                <a href="{{ route('work-schedule.index') }}" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-cyan-300 hover:bg-cyan-50">Jadwal Mingguan</a>
+            </div>
         </div>
     </x-slot>
 
-    <div class="app-panel mb-5 p-4">
+    <div class="app-panel mb-5 p-4 sm:p-5">
         <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-                <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Periode kalender</p>
-                <h3 class="mt-1 text-lg font-semibold text-slate-900">{{ $selectedDate->translatedFormat('F Y') }}</h3>
+                <p class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Periode kalender</p>
+                <h3 class="mt-1 text-xl font-bold tracking-tight text-slate-900">{{ $selectedDate->translatedFormat('F Y') }}</h3>
             </div>
-            <div class="flex flex-wrap items-center gap-2">
-                <a href="{{ route('work-calendar.index', ['month' => $previousMonth->format('Y-m'), 'unit_id' => $unitId]) }}" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Sebelumnya</a>
-                <a href="{{ route('work-calendar.index', ['month' => $nextMonth->format('Y-m'), 'unit_id' => $unitId]) }}" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Berikutnya</a>
+            <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                <div class="flex items-center gap-2">
+                    <a aria-label="Bulan sebelumnya" href="{{ route('work-calendar.index', ['month' => $previousMonth->format('Y-m'), 'unit_id' => $unitId]) }}" class="calendar-control-button">‹ <span class="hidden sm:inline">Sebelumnya</span></a>
+                    <a aria-label="Bulan berikutnya" href="{{ route('work-calendar.index', ['month' => $nextMonth->format('Y-m'), 'unit_id' => $unitId]) }}" class="calendar-control-button"><span class="hidden sm:inline">Berikutnya</span> ›</a>
+                </div>
                 <form method="GET" action="{{ route('work-calendar.index') }}" class="flex items-center gap-2">
                     <input type="hidden" name="month" value="{{ $selectedMonth }}">
-                    <select name="unit_id" aria-label="Filter unit" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+                    <select name="unit_id" aria-label="Filter unit" class="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-100 sm:flex-none">
                         <option value="">Semua unit</option>
                         @foreach ($units as $unit)
                             <option value="{{ $unit->id }}" @selected((string) $unitId === (string) $unit->id)>{{ $unit->code }}</option>
                         @endforeach
                     </select>
-                    <button class="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">Filter</button>
+                    <button class="calendar-control-button">Terapkan</button>
                 </form>
             </div>
         </div>
     </div>
 
     <div class="calendar-shell mb-6">
-        <div class="calendar-grid border-b border-slate-200 bg-slate-50 text-center text-xs font-semibold uppercase text-slate-500">
+        <div class="calendar-grid calendar-weekdays border-b border-slate-200 bg-slate-50/90 text-center text-[0.68rem] font-bold uppercase tracking-wide text-slate-500">
             @foreach (['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'] as $weekday)
                 <div class="py-3">{{ $weekday }}</div>
             @endforeach
@@ -76,6 +92,7 @@
             @foreach ($calendarDays as $day)
                 @php
                     $dayEntries = $calendarEntries->get($day->format('Y-m-d'), collect());
+                    $dayEntryGroups = $groupCalendarEntries($dayEntries);
                     $unitCode = $unitId === null ? null : $units->firstWhere('id', (int) $unitId)?->code;
                     $routineWorking = $unitCode === 'TK'
                         ? $day->dayOfWeekIso < 6
@@ -85,10 +102,6 @@
                     $isWorking = $unitCode === null
                         ? null
                         : ($dayEntries->first()?->is_working_day ?? $routineWorking);
-                    $hasRamadan = $periods->contains(fn ($period) => (
-                        $period->unit_id === null || $unitId === null || (int) $period->unit_id === (int) $unitId
-                    ) && $period->start_date->lessThanOrEqualTo($day) && $period->end_date->greaterThanOrEqualTo($day));
-                    $hasNationalEvent = $nationalEvents->contains(fn ($event) => $event->date->format('Y-m-d') === $day->format('Y-m-d'));
                 @endphp
                 <div class="calendar-day {{ $day->month !== $selectedDate->month ? 'is-outside-month' : '' }} {{ $day->isToday() ? 'is-today' : '' }}">
                     <div class="calendar-day__header">
@@ -98,188 +111,190 @@
                         @endif
                     </div>
                     <div class="calendar-day__items">
-                        @foreach ($dayEntries as $entry)
+                        @foreach ($dayEntryGroups as $dayEntryGroup)
+                            @php
+                                $entry = $dayEntryGroup->first();
+                                $coversAllUnits = $units->isNotEmpty() && $units->every(fn ($unit) => $dayEntryGroup->contains('unit_id', $unit->id));
+                                $unitLabel = $coversAllUnits ? 'Semua unit' : $dayEntryGroup->pluck('unit.code')->filter()->unique()->sort()->implode(' · ');
+                            @endphp
                             <span class="calendar-day__item {{ $entry->type->value === 'holiday' ? 'calendar-day__item--holiday' : (($entry->type->value === 'special_event' || $entry->type->value === 'special_workday') ? 'calendar-day__item--special' : 'calendar-day__item--work') }}">
-                                {{ $entry->title ?: $entry->type->value }}{{ $entry->unit ? ' · '.$entry->unit->code : '' }}
+                                {{ $entry->title ?: $entry->type->value }}{{ $unitLabel !== '' ? ' · '.$unitLabel : '' }}
                             </span>
                         @endforeach
-                        @if ($hasRamadan)
-                            <span class="calendar-day__item calendar-day__item--special">Jadwal periode</span>
-                        @endif
-                        @if ($hasNationalEvent)
-                            <span class="calendar-day__item calendar-day__item--holiday">Kandidat nasional</span>
-                        @endif
                     </div>
                 </div>
             @endforeach
         </div>
     </div>
 
-    <div class="grid gap-6 xl:grid-cols-[1.4fr_0.6fr]">
-        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h3 class="text-lg font-semibold text-slate-900">Agenda mendatang</h3>
-            <div class="mt-5 space-y-3">
-                @forelse ($calendarEntries->flatten()->take(10) as $entry)
-                    <div class="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-3">
-                        <div>
-                            <p class="font-semibold text-slate-900">{{ $entry->title ?: 'Agenda kerja' }}</p>
-                            <p class="text-xs text-slate-500">{{ $entry->unit?->code ?? $entry->unit?->name }} · {{ $entry->date?->format('d M Y') }} · {{ $entry->description }}</p>
-                        </div>
-                        <div class="flex shrink-0 items-center gap-2">
-                            <span class="rounded-full {{ $entry->type->value === 'holiday' ? 'bg-pink-100 text-pink-700' : 'bg-sky-100 text-sky-700' }} px-2.5 py-1 text-xs font-semibold">{{ $entry->type->value ?? 'workday' }}</span>
-                            <button type="button" data-edit-calendar data-endpoint="{{ route('work-calendars.update', $entry) }}" data-unit="{{ $entry->unit_id }}" data-date="{{ $entry->date->format('Y-m-d') }}" data-type="{{ $entry->type->value }}" data-title="{{ $entry->title }}" data-description="{{ $entry->description }}" data-working="{{ $entry->is_working_day ? '1' : '0' }}" data-start="{{ substr((string) $entry->start_time, 0, 5) }}" data-end="{{ substr((string) $entry->end_time, 0, 5) }}" class="rounded-lg border border-slate-300 px-2 py-1 text-xs">Ubah</button>
-                            <form data-api-form data-endpoint="{{ route('work-calendars.destroy', $entry) }}" data-method="DELETE" data-reload-on-success="true">
-                                <button type="submit" class="rounded-lg border border-rose-300 px-2 py-1 text-xs text-rose-700">Hapus</button>
-                                <p data-form-status role="status" aria-live="polite" class="sr-only"></p>
-                            </form>
-                        </div>
-                    </div>
-                @empty
-                    <div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">Belum ada agenda kerja.</div>
-                @endforelse
+    <div class="calendar-section">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+                <h3 class="text-lg font-semibold text-slate-900">Daftar Agenda &amp; Hari Libur {{ $selectedDate->year }}</h3>
+                <p class="mt-1 text-sm text-slate-500">Agenda yang sama untuk beberapa unit digabung dalam satu baris; data tiap unit tetap terpisah.</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <span class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">Total {{ $agendaGroups->count() }} agenda</span>
+                <button type="button" data-open-calendar-dialog class="calendar-primary-button">+ Tambah agenda</button>
             </div>
         </div>
-
-        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h3 class="text-lg font-semibold text-slate-900">Tambah agenda</h3>
-            <form id="calendar-entry-form" data-api-form data-store-endpoint="{{ route('work-calendars.store') }}" data-endpoint="{{ route('work-calendars.store') }}" data-reload-on-success="true" class="mt-5 space-y-4 text-sm">
-                <div>
-                    <label for="calendar-unit" class="mb-1 block text-sm font-medium text-slate-700">Unit</label>
-                    <select id="calendar-unit" name="unit_id" required class="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 text-slate-800 focus:border-cyan-500 focus:outline-none">
-                        @foreach (\App\Models\Unit::query()->orderBy('name')->get() as $unit)
-                            <option value="{{ $unit->id }}">{{ $unit->code ?? $unit->name }}</option>
-                        @endforeach
-                    </select>
-                </div>
-                <div>
-                    <label for="calendar-date" class="mb-1 block text-sm font-medium text-slate-700">Tanggal</label>
-                    <input id="calendar-date" name="date" type="date" required class="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 text-slate-800 focus:border-cyan-500 focus:outline-none" />
-                </div>
-                <div>
-                    <label for="calendar-type" class="mb-1 block text-sm font-medium text-slate-700">Jenis</label>
-                    <select id="calendar-type" name="type" required class="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 text-slate-800 focus:border-cyan-500 focus:outline-none">
-                        <option value="holiday">Libur</option>
-                        <option value="workday">Hari kerja</option>
-                        <option value="special_workday">Hari kerja khusus</option>
-                        <option value="special_event">Acara khusus</option>
-                    </select>
-                </div>
-                <div>
-                    <label for="calendar-title" class="mb-1 block text-sm font-medium text-slate-700">Nama agenda</label>
-                    <input id="calendar-title" name="title" type="text" maxlength="255" class="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 text-slate-800 focus:border-cyan-500 focus:outline-none" />
-                </div>
-                <input name="is_working_day" type="hidden" value="0" />
-                <label class="flex items-center gap-2 text-sm text-slate-700"><input name="is_working_day" type="checkbox" value="1" class="rounded border-slate-300 text-cyan-700 focus:ring-cyan-600" /> Hari kerja</label>
-                <div class="grid grid-cols-2 gap-3">
-                    <div><label for="calendar-start" class="mb-1 block text-sm font-medium text-slate-700">Mulai</label><input id="calendar-start" name="start_time" type="time" class="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5" /></div>
-                    <div><label for="calendar-end" class="mb-1 block text-sm font-medium text-slate-700">Selesai</label><input id="calendar-end" name="end_time" type="time" class="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5" /></div>
-                </div>
-                <button type="submit" class="w-full rounded-xl bg-pink-700 px-4 py-2.5 text-sm font-medium text-white hover:bg-pink-800">Simpan agenda</button>
-                <button type="button" data-cancel-calendar-edit class="hidden w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700">Batal ubah</button>
-                <p data-form-status role="status" aria-live="polite" class="text-sm text-slate-600"></p>
-            </form>
+        <div class="mt-4 overflow-x-auto">
+            <table class="calendar-agenda-table min-w-full divide-y divide-slate-200 text-left text-sm">
+                <thead class="bg-slate-50 text-[0.68rem] font-bold uppercase tracking-wide text-slate-500">
+                    <tr>
+                        <th class="px-4 py-3">Tanggal pelaksanaan</th>
+                        <th class="px-4 py-3">Durasi</th>
+                        <th class="px-4 py-3">Nama agenda / hari libur</th>
+                        <th class="px-4 py-3">Jenis agenda</th>
+                        <th class="px-4 py-3">Unit</th>
+                        <th class="px-4 py-3">Dampak rekap absensi</th>
+                        <th class="px-4 py-3 text-right">Aksi</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-200">
+                    @forelse ($agendaGroups as $agendaGroup)
+                        @php
+                            $entry = $agendaGroup->first();
+                            $groupUnits = $agendaGroup->pluck('unit.code')->filter()->unique()->sort()->values();
+                            $coversAllUnits = $units->isNotEmpty() && $units->every(fn ($unit) => $agendaGroup->contains('unit_id', $unit->id));
+                            $unitLabel = $coversAllUnits ? 'Semua unit' : $groupUnits->implode(' · ');
+                        @endphp
+                        <tr class="calendar-agenda-row">
+                            <td data-label="Tanggal" class="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">{{ $entry->date->format('d/m/Y') }}<p class="mt-1 text-xs font-normal text-slate-500">{{ $entry->date->translatedFormat('l') }}</p></td>
+                            <td data-label="Durasi" class="px-4 py-3"><span class="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-700">1 hari</span></td>
+                            <td data-label="Nama agenda" class="min-w-52 px-4 py-3"><p class="font-semibold text-slate-900">{{ $entry->title ?: 'Agenda kerja' }}</p><p class="mt-1 text-xs text-slate-500">{{ $entry->description ?: ($entry->national_calendar_event_id ? 'Sinkronisasi otomatis hari libur nasional' : 'Agenda operasional sekolah') }}</p></td>
+                            <td data-label="Jenis" class="px-4 py-3"><span class="rounded-full px-2.5 py-1 text-xs font-semibold {{ $entry->type->value === 'holiday' ? 'bg-rose-50 text-rose-700' : ($entry->type->value === 'special_event' ? 'bg-violet-50 text-violet-700' : 'bg-cyan-50 text-cyan-700') }}">{{ $entry->type->value === 'holiday' ? 'Libur' : ($entry->type->value === 'special_workday' ? 'Hari kerja khusus' : ($entry->type->value === 'special_event' ? 'Agenda / dinas' : 'Hari kerja')) }}</td>
+                            <td data-label="Unit" class="px-4 py-3"><span class="inline-flex whitespace-nowrap rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">{{ $unitLabel ?: ($entry->unit?->name ?? 'Unit') }}</span></td>
+                            <td data-label="Dampak absensi" class="whitespace-nowrap px-4 py-3"><span class="rounded-full px-2.5 py-1 text-xs font-semibold {{ $entry->is_working_day ? 'bg-violet-50 text-violet-700' : 'bg-emerald-50 text-emerald-700' }}">{{ $entry->is_working_day ? 'Tetap masuk kerja' : 'Bebas kewajiban absen' }}</span></td>
+                            <td data-label="Aksi" class="px-4 py-3">
+                                <div class="calendar-row-actions">
+                                    @foreach ($agendaGroup as $unitEntry)
+                                        <div class="calendar-row-actions__unit">
+                                            <button type="button" data-edit-calendar data-endpoint="{{ route('work-calendars.update', $unitEntry) }}" data-unit="{{ $unitEntry->unit_id }}" data-date="{{ $unitEntry->date->format('Y-m-d') }}" data-type="{{ $unitEntry->type->value }}" data-title="{{ $unitEntry->title }}" data-description="{{ $unitEntry->description }}" data-working="{{ $unitEntry->is_working_day ? '1' : '0' }}" data-start="{{ substr((string) $unitEntry->start_time, 0, 5) }}" data-end="{{ substr((string) $unitEntry->end_time, 0, 5) }}" class="calendar-row-actions__button calendar-row-actions__button--edit" aria-label="Edit agenda {{ $entry->title }} untuk {{ $unitEntry->unit?->code ?? $unitEntry->unit?->name }}" title="Edit agenda">
+                                                <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" class="calendar-row-actions__icon"><path d="m13.5 3.5 3 3M4 16l3.8-.8L16 7a2.12 2.12 0 0 0-3-3L4.8 13.2 4 16Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                            </button>
+                                            <form data-api-form data-endpoint="{{ route('work-calendars.destroy', $unitEntry) }}" data-method="DELETE" data-confirm="Hapus agenda untuk unit {{ $unitEntry->unit?->code ?? $unitEntry->unit?->name }}?" data-reload-on-success="true">
+                                                <button type="submit" class="calendar-row-actions__button calendar-row-actions__button--delete" aria-label="Hapus agenda {{ $entry->title }} untuk {{ $unitEntry->unit?->code ?? $unitEntry->unit?->name }}" title="Hapus agenda">
+                                                    <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" class="calendar-row-actions__icon"><path d="M4.5 6h11m-9.5 0 .6 10h7.8L15 6m-7-2h4l.7 2H7.3L8 4Zm1.5 4v5m3-5v5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                                </button>
+                                                <p data-form-status role="status" aria-live="polite" class="sr-only"></p>
+                                            </form>
+                                        </div>
+                                    @endforeach
+                                </div>
+                            </td>
+                        </tr>
+                    @empty
+                        <tr class="calendar-agenda-empty"><td colspan="7" class="px-4 py-10 text-center text-sm text-slate-500">Belum ada agenda pada periode ini. Sinkronkan API atau tambahkan agenda baru.</td></tr>
+                    @endforelse
+                </tbody>
+            </table>
         </div>
     </div>
 
-    <div class="mt-6 grid gap-6 xl:grid-cols-2">
-        <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <dialog id="calendar-entry-dialog" class="calendar-dialog">
+        <div class="calendar-dialog__panel">
+            <div class="calendar-dialog__header">
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-700">Kalender operasional</p>
+                    <h3 class="mt-1 text-xl font-bold text-slate-900">Tambah Agenda / Hari Libur</h3>
+                </div>
+                <button type="button" data-close-calendar-dialog class="calendar-dialog__close" aria-label="Tutup">×</button>
+            </div>
+            <form id="calendar-entry-form" data-api-form data-store-endpoint="{{ route('work-calendars.bulk-upsert') }}" data-endpoint="{{ route('work-calendars.bulk-upsert') }}" data-reload-on-success="true" data-close-dialog-on-success="true" class="space-y-4 p-5">
+                <div>
+                    <label for="calendar-title" class="mb-1 block text-sm font-semibold text-slate-700">Nama agenda / hari libur <span class="text-rose-600">*</span></label>
+                    <input id="calendar-title" name="title" type="text" maxlength="255" required placeholder="Contoh: Libur Hari Raya / Rapat Koordinasi Tahunan" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-800 focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-100">
+                </div>
+                <div class="grid gap-4 sm:grid-cols-2">
+                    <div>
+                        <label for="calendar-date-from" class="mb-1 block text-sm font-semibold text-slate-700">Tanggal mulai <span class="text-rose-600">*</span></label>
+                        <input id="calendar-date-from" name="date_from" type="date" required class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-800">
+                    </div>
+                    <div>
+                        <label for="calendar-date-to" class="mb-1 block text-sm font-semibold text-slate-700">Tanggal selesai <span class="text-rose-600">*</span></label>
+                        <input id="calendar-date-to" name="date_to" type="date" required class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-800">
+                        <p class="mt-1 text-xs text-slate-500">Tanggal sama untuk 1 hari, atau rentang untuk beberapa hari.</p>
+                    </div>
+                </div>
+                <div class="grid gap-4 sm:grid-cols-2">
+                    <div>
+                        <label for="calendar-type" class="mb-1 block text-sm font-semibold text-slate-700">Jenis agenda <span class="text-rose-600">*</span></label>
+                        <select id="calendar-type" name="type" required class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-800">
+                            <option value="holiday">Libur</option>
+                            <option value="special_event">Agenda / dinas</option>
+                            <option value="special_workday">Hari kerja khusus</option>
+                            <option value="workday">Hari kerja</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="calendar-impact" class="mb-1 block text-sm font-semibold text-slate-700">Dampak pada status rekap <span class="text-rose-600">*</span></label>
+                        <select id="calendar-impact" name="is_working_day" data-calendar-impact required class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-800">
+                            <option value="0">Hari libur (bebas kewajiban absen)</option>
+                            <option value="1">Tetap masuk kerja</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label for="calendar-unit" class="mb-1 block text-sm font-semibold text-slate-700">Berlaku untuk unit <span class="text-rose-600">*</span></label>
+                    <select id="calendar-unit" name="unit_id" required class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-800">
+                        @foreach ($units as $unit)
+                            <option value="{{ $unit->id }}">{{ $unit->code }}</option>
+                        @endforeach
+                    </select>
+                </div>
+                <div data-calendar-time-fields class="hidden grid gap-4 sm:grid-cols-2">
+                    <div><label for="calendar-start" class="mb-1 block text-sm font-semibold text-slate-700">Mulai</label><input id="calendar-start" name="start_time" type="time" class="w-full rounded-lg border border-slate-300 px-3 py-2.5"></div>
+                    <div><label for="calendar-end" class="mb-1 block text-sm font-semibold text-slate-700">Selesai</label><input id="calendar-end" name="end_time" type="time" class="w-full rounded-lg border border-slate-300 px-3 py-2.5"></div>
+                </div>
+                <div>
+                    <label for="calendar-description" class="mb-1 block text-sm font-semibold text-slate-700">Keterangan / catatan</label>
+                    <textarea id="calendar-description" name="description" rows="3" placeholder="Opsional: keterangan surat edaran atau lokasi agenda..." class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-800"></textarea>
+                </div>
+                <input type="hidden" name="date" value="">
+                <div class="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
+                    <button type="button" data-close-calendar-dialog class="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Batal</button>
+                    <button type="submit" class="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700">Simpan agenda</button>
+                </div>
+                <p data-form-status role="status" aria-live="polite" class="text-sm text-slate-600"></p>
+            </form>
+        </div>
+    </dialog>
+
+    <div class="mt-6">
+        <section class="calendar-section">
             <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h3 class="text-lg font-semibold text-slate-900">Kalender nasional (Nager.Date)</h3>
-                    <p class="mt-1 text-xs text-slate-500">Hanya data kandidat; verifikasi tidak otomatis mengubah jadwal absensi.</p>
+                    <h3 class="text-lg font-semibold text-slate-900">Libur Nasional &amp; Cuti Bersama</h3>
+                    <p class="mt-1 text-xs text-slate-500">Data mengikuti keputusan bersama tiga menteri dan disinkronkan ke kalender operasional unit.</p>
                 </div>
                 <form data-api-form data-endpoint="{{ route('national-calendar-events.sync') }}" data-reload-on-success="true" class="flex items-center gap-2">
-                    <input type="number" name="year" value="{{ $selectedDate->year }}" min="2000" max="2100" required class="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm" aria-label="Tahun sinkronisasi">
-                    <button type="submit" class="rounded-lg bg-cyan-700 px-3 py-2 text-sm font-semibold text-white">Sinkronkan API</button>
-                    <p data-form-status role="status" aria-live="polite" class="sr-only"></p>
+                <input type="number" name="year" value="{{ $selectedDate->year }}" min="2000" max="2100" required class="w-24 rounded-lg border border-slate-200 px-3 py-2 text-sm" aria-label="Tahun sinkronisasi">
+                <button type="submit" class="calendar-primary-button">Sinkronkan API</button>
+                    <p data-form-status role="status" aria-live="polite" class="text-xs text-slate-600"></p>
                 </form>
             </div>
-            <p class="mt-2 text-xs text-slate-500">Sumber hanya memuat hari libur publik yang diterbitkan API, bukan cuti bersama atau ketetapan Ramadan. Tanggal yang sudah diverifikasi tidak ditimpa sinkronisasi berikutnya.</p>
-            <div class="mt-4 max-h-96 space-y-3 overflow-y-auto">
+            <p class="mt-2 text-xs text-slate-500">Libur nasional dan cuti bersama otomatis diterapkan sebagai hari libur untuk unit TK dan SD. Catatan agenda lama disimpan saat tanggal yang sama diperbarui.</p>
+            <div class="mt-4 max-h-[34rem] space-y-3 overflow-y-auto pr-1">
                 @forelse ($nationalEvents as $event)
-                    <div class="flex flex-col gap-2 rounded-xl border border-slate-200 p-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div class="calendar-national-event">
                         <div>
                             <p class="font-semibold text-slate-900">{{ $event->local_name }}</p>
-                            <p class="text-xs text-slate-500">{{ $event->date->format('d M Y') }} · {{ $event->name }} · {{ $event->source }}</p>
-                            <a href="{{ $event->source_url }}" target="_blank" rel="noopener noreferrer" class="text-xs text-cyan-700 underline">Sumber data API</a>
-                            <span class="ml-2 rounded-full px-2 py-0.5 text-xs {{ $event->verification_status === 'verified' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700' }}">{{ $event->verification_status === 'verified' ? 'Terverifikasi sumber' : 'Menunggu verifikasi' }}</span>
-                            @if ($event->verification_source_url)
-                                <a href="{{ $event->verification_source_url }}" target="_blank" rel="noopener noreferrer" class="ml-2 text-xs text-emerald-700 underline">Lihat ketetapan resmi</a>
-                            @endif
+                            <p class="text-xs text-slate-500">{{ $event->date->format('d M Y') }} · {{ $event->name }} · {{ in_array('joint_leave', $event->types ?? [], true) ? 'Cuti bersama' : 'Libur nasional' }}</p>
+                            <a href="{{ $event->source_url }}" target="_blank" rel="noopener noreferrer" class="mt-1 inline-flex text-xs font-medium text-cyan-700 underline underline-offset-2 hover:text-cyan-900">Sumber data API</a>
                         </div>
-                        <div class="flex shrink-0 flex-wrap gap-2">
-                            <button type="button" data-apply-national-event data-date="{{ $event->date->format('Y-m-d') }}" data-title="{{ $event->local_name }}" class="rounded-lg border border-pink-700 px-3 py-2 text-xs font-semibold text-pink-800">Atur operasional</button>
-                            @if ($event->verification_status === 'pending')
-                                <form data-api-form data-endpoint="{{ route('national-calendar-events.verify', $event) }}" data-reload-on-success="true" class="flex items-center gap-2">
-                                    <input type="url" name="verification_source_url" required maxlength="500" placeholder="URL resmi .go.id" aria-label="URL sumber resmi pemerintah" class="w-40 rounded-lg border border-slate-300 px-2 py-2 text-xs">
-                                    <button type="submit" class="rounded-lg border border-cyan-700 px-3 py-2 text-xs font-semibold text-cyan-800">Catat verifikasi</button>
-                                    <p data-form-status role="status" aria-live="polite" class="sr-only"></p>
-                                </form>
-                            @endif
-                        </div>
+                        @php
+                            $appliedUnitCount = $event->work_calendar_entries_count;
+                            $expectedUnitCount = $units->count();
+                            $appliedToAllUnits = $expectedUnitCount > 0 && $appliedUnitCount >= $expectedUnitCount;
+                        @endphp
+                        <span class="shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold {{ $appliedToAllUnits ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700' }}">{{ $expectedUnitCount === 0 ? 'Unit TK/SD belum tersedia' : ($appliedToAllUnits ? 'Masuk kalender operasional' : ($appliedUnitCount > 0 ? 'Masuk sebagian unit' : 'Belum diterapkan')) }}</span>
                     </div>
                 @empty
-                    <p class="rounded-xl border border-dashed border-slate-300 p-5 text-center text-sm text-slate-500">Belum ada data nasional. Sinkronkan untuk memuat kandidat.</p>
+                    <p class="rounded-xl border border-dashed border-slate-300 p-5 text-center text-sm text-slate-500">Belum ada data libur nasional. Sinkronkan API untuk mengambil dan menyimpan agenda otomatis.</p>
                 @endforelse
             </div>
         </section>
 
-        <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h3 class="text-lg font-semibold text-slate-900">Jadwal khusus periode (mis. Ramadan)</h3>
-            <p class="mt-1 text-xs text-slate-500">Pilih profil kategori yang sudah disetujui. Periode berlaku otomatis pada unit, tanggal, dan hari yang ditetapkan profil.</p>
-            <form id="schedule-period-form" data-api-form data-store-endpoint="{{ route('work-schedule-periods.store') }}" data-endpoint="{{ route('work-schedule-periods.store') }}" data-reload-on-success="true" class="mt-4 grid gap-3 sm:grid-cols-2">
-                <input name="name" type="text" maxlength="255" required placeholder="Nama periode, mis. Ramadan" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                <select name="unit_id" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                    <option value="">TK dan SD</option>
-                    @foreach ($units as $unit)
-                        <option value="{{ $unit->id }}">{{ $unit->code }}</option>
-                    @endforeach
-                </select>
-                <select name="work_schedule_category_id" required data-schedule-category-select class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                    <option value="">Pilih kategori pegawai</option>
-                    @foreach ($categories as $category)
-                        <option value="{{ $category->id }}" data-category-active="{{ $category->is_active ? 'true' : 'false' }}">{{ $category->name }}</option>
-                    @endforeach
-                </select>
-                <select name="work_schedule_profile_id" required data-schedule-profile-select class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                    <option value="">Pilih profil jadwal</option>
-                    @foreach ($categories as $category)
-                        @foreach ($category->profiles->where('is_active', true) as $profile)
-                            <option value="{{ $profile->id }}" data-category-id="{{ $category->id }}">{{ $category->name }} · {{ $profile->name }}</option>
-                        @endforeach
-                    @endforeach
-                </select>
-                <label class="text-xs text-slate-600">Tanggal mulai<input name="start_date" type="date" required class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"></label>
-                <label class="text-xs text-slate-600">Tanggal akhir<input name="end_date" type="date" required class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"></label>
-                <label class="text-xs text-slate-600 sm:col-span-2">Status
-                    <select name="is_active" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                        <option value="1" selected>Aktif</option>
-                        <option value="0">Nonaktif</option>
-                    </select>
-                </label>
-                <button type="submit" class="rounded-lg bg-violet-700 px-3 py-2 text-sm font-semibold text-white sm:col-span-2">Simpan jadwal periode</button>
-                <button type="button" data-cancel-period-edit class="hidden rounded-lg border border-slate-300 px-3 py-2 text-sm sm:col-span-2">Batal ubah</button>
-                <p data-form-status role="status" aria-live="polite" class="text-sm text-slate-600 sm:col-span-2"></p>
-            </form>
-            <div class="mt-5 max-h-72 space-y-2 overflow-y-auto">
-                @forelse (\App\Models\WorkSchedulePeriod::query()->with(['unit', 'category', 'profile'])->orderByDesc('start_date')->limit(30)->get() as $period)
-                    <div class="flex items-center justify-between gap-3 rounded-xl border border-slate-200 p-3">
-                        <div class="min-w-0">
-                            <p class="truncate font-semibold text-slate-900">{{ $period->name }} · {{ $period->unit?->code ?? 'TK & SD' }}</p>
-                            <p class="text-xs text-slate-500">{{ $period->category?->name }} · {{ $period->profile?->name }} · {{ $period->start_date->format('d M Y') }}–{{ $period->end_date->format('d M Y') }} · {{ $period->is_active ? 'Aktif' : 'Nonaktif' }}</p>
-                        </div>
-                        <div class="flex shrink-0 gap-2">
-                            <button type="button" data-edit-period data-endpoint="{{ route('work-schedule-periods.update', $period) }}" data-name="{{ $period->name }}" data-unit="{{ $period->unit_id }}" data-category="{{ $period->work_schedule_category_id }}" data-profile="{{ $period->work_schedule_profile_id }}" data-start="{{ $period->start_date->format('Y-m-d') }}" data-end="{{ $period->end_date->format('Y-m-d') }}" data-active="{{ $period->is_active ? '1' : '0' }}" class="rounded-lg border border-slate-300 px-2 py-1 text-xs">Ubah</button>
-                            <form data-api-form data-endpoint="{{ route('work-schedule-periods.destroy', $period) }}" data-method="DELETE" data-reload-on-success="true">
-                                <button type="submit" class="rounded-lg border border-rose-300 px-2 py-1 text-xs text-rose-700">Hapus</button>
-                                <p data-form-status role="status" aria-live="polite" class="sr-only"></p>
-                            </form>
-                        </div>
-                    </div>
-                @empty
-                    <p class="rounded-xl border border-dashed border-slate-300 p-4 text-center text-sm text-slate-500">Belum ada periode jadwal khusus.</p>
-                @endforelse
-            </div>
-        </section>
     </div>
 </x-app-layout>

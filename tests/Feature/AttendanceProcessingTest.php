@@ -504,7 +504,7 @@ class AttendanceProcessingTest extends TestCase
     }
 
     #[DataProvider('absenceReasonCases')]
-    public function test_absence_requests_always_resolve_to_alpha_and_preserve_known_reason(string $reason): void
+    public function test_absence_requests_resolve_to_sick_or_permission_by_reason(string $reason): void
     {
         $unit = $this->createUnit('TK');
         $employee = $this->createEmployee($unit);
@@ -513,7 +513,10 @@ class AttendanceProcessingTest extends TestCase
 
         $record = $this->process($unit, $employee);
 
-        $this->assertSame(AttendanceStatus::Absent, $record->status);
+        $this->assertSame(
+            $reason === AbsenceReason::Sick->value ? AttendanceStatus::Sick : AttendanceStatus::Permission,
+            $record->status,
+        );
         $this->assertFalse($record->needs_verification);
         $this->assertSame($reason, $record->absence_reason?->value);
     }
@@ -527,7 +530,7 @@ class AttendanceProcessingTest extends TestCase
         ];
     }
 
-    public function test_absence_request_conflicting_with_fingerprint_stays_alpha_and_keeps_anomaly(): void
+    public function test_absence_request_conflicting_with_fingerprint_keeps_sick_status_and_anomaly(): void
     {
         $unit = $this->createUnit('TK');
         $employee = $this->createEmployee($unit);
@@ -537,7 +540,7 @@ class AttendanceProcessingTest extends TestCase
 
         $record = $this->process($unit, $employee);
 
-        $this->assertSame(AttendanceStatus::Absent, $record->status);
+        $this->assertSame(AttendanceStatus::Sick, $record->status);
         $this->assertFalse($record->needs_verification);
         $this->assertSame($record->leaveRequest?->id, $record->leave_request_id);
         $this->assertDatabaseHas('attendance_anomalies', [
@@ -576,7 +579,7 @@ class AttendanceProcessingTest extends TestCase
 
             $record = $this->process($unit, $employee);
             $this->assertSame(
-                $type === LeaveType::OfficialDuty ? AttendanceStatus::OfficialDuty : AttendanceStatus::Absent,
+                $type === LeaveType::OfficialDuty ? AttendanceStatus::OfficialDuty : AttendanceStatus::Permission,
                 $record->status,
             );
             $this->assertFalse($record->needs_verification);
@@ -1153,12 +1156,12 @@ class AttendanceProcessingTest extends TestCase
         $this->assertSame('14:01', substr($employee->attendanceRecords()->sole()->actual_out, 0, 5));
     }
 
-    public function test_record_marked_for_verification_is_preserved_during_reprocessing(): void
+    public function test_confirmed_exit_leave_resolves_existing_verification_record_and_keeps_incomplete_interval_visible(): void
     {
         $unit = $this->createUnit('TK');
         $employee = $this->createEmployee($unit);
         $this->createSchedule($unit, self::DATE);
-        $this->createFingerprintLogs($unit, $employee, self::DATE, ['07:00', '10:00', '12:00', '15:30']);
+        $this->createFingerprintLogs($unit, $employee, self::DATE, ['07:00', '10:00', '12:00']);
         $service = app(AttendanceProcessingService::class);
         $result = $service->processEmployeeDate($unit->id, $employee->id, self::DATE);
         $record = AttendanceRecord::query()->findOrFail($result['attendance_record_id']);
@@ -1168,14 +1171,19 @@ class AttendanceProcessingTest extends TestCase
         $leave = $this->createLeave($unit, $employee, self::DATE, LeaveType::TemporaryExit);
         $reprocessResult = $service->processEmployeeDate($unit->id, $employee->id, self::DATE);
 
-        $this->assertTrue($reprocessResult['preserved_for_review']);
-        $this->assertSame($original, $record->fresh()->toArray());
-        $this->assertNull($record->leave_request_id);
-        $this->assertSame(0, $record->intervals()->count());
-        $this->assertSame(1, $record->anomalies()->where('type', AttendanceAnomalyType::ExitReentryWithoutLeaveRequest->value)->count());
+        $this->assertFalse($reprocessResult['preserved_for_review']);
+        $this->assertNotSame($original, $record->fresh()->toArray());
+        $record->refresh();
+        $this->assertSame(AttendanceStatus::NeedsVerification, $record->status);
+        $this->assertTrue($record->needs_verification);
+        $this->assertSame($leave->id, $record->leave_request_id);
+        $this->assertSame(1, $record->intervals()->count());
+        $this->assertSame(120, $record->intervals()->sole()->duration_minutes);
+        $this->assertSame(1, $record->anomalies()->where('type', AttendanceAnomalyType::OddFingerprintCountForExit->value)->count());
 
-        $service->processEmployeeDate($unit->id, $employee->id, self::DATE);
-        $this->assertSame($original, $record->refresh()->toArray());
+        $repeatResult = $service->processEmployeeDate($unit->id, $employee->id, self::DATE);
+        $this->assertFalse($repeatResult['preserved_for_review']);
+        $this->assertSame($leave->id, $record->refresh()->leave_request_id);
         $this->assertSame(1, AttendanceRecord::query()->where('employee_id', $employee->id)->whereDate('attendance_date', self::DATE)->count());
     }
 

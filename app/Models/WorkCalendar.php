@@ -14,6 +14,7 @@ class WorkCalendar extends Model
     protected $fillable = [
         'unit_id',
         'date',
+        'national_calendar_event_id',
         'type',
         'title',
         'description',
@@ -34,5 +35,10 @@ class WorkCalendar extends Model
     public function unit(): BelongsTo
     {
         return $this->belongsTo(Unit::class);
+    }
+
+    public function nationalCalendarEvent(): BelongsTo
+    {
+        return $this->belongsTo(NationalCalendarEvent::class);
     }
 }

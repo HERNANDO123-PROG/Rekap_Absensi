@@ -3,6 +3,7 @@
 namespace App\Services\Leave;
 
 use App\Enums\EmployeeStatus;
+use App\Enums\AbsenceReason;
 use App\Enums\LeaveApprovalStatus;
 use App\Enums\LeaveType;
 use App\Enums\MatchingStatus;
@@ -69,7 +70,7 @@ class ManualLeaveRequestService
                 'description' => null,
                 'attachment' => null,
                 'matching_status' => MatchingStatus::Matched,
-                'absence_reason' => null,
+                'absence_reason' => $leaveType === LeaveType::Absent ? AbsenceReason::Permission : null,
                 'approval_status' => LeaveApprovalStatus::Pending,
                 'confirmed_by' => null,
                 'confirmed_at' => null,
@@ -162,7 +163,7 @@ class ManualLeaveRequestService
                 'leave_type' => $leaveType,
                 'raw_leave_type' => $this->rawLeaveType($leaveType),
                 'matching_status' => MatchingStatus::Matched,
-                'absence_reason' => null,
+                'absence_reason' => $leaveType === LeaveType::Absent ? AbsenceReason::Permission : null,
             ]);
             if ($substantiveChange && $oldApprovalStatus === LeaveApprovalStatus::Confirmed) {
                 $leaveRequest->fill([

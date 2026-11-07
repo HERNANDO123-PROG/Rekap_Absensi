@@ -13,14 +13,63 @@ use App\Models\AttendanceRecord;
 use App\Models\Employee;
 use App\Models\Unit;
 use App\Models\User;
+use App\Services\Exports\AttendanceAnnualExportService;
+use App\Services\Exports\AttendancePeriodExportService;
+use App\Services\Exports\EmployeeAttendanceDetailExportService;
+use App\Services\Exports\ExcelExportHelper;
+use App\Services\Reports\AttendanceAnnualReportService;
+use App\Services\Reports\AttendancePeriodReportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use Tests\TestCase;
 
 class AttendanceExportTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_export_helper_preserves_formula_prefixes_as_literal_text(): void
+    {
+        $values = [
+            '=1+1',
+            '+1+1',
+            '-1+1',
+            '@SUM(1,1)',
+            "\t=1+1",
+            "\r=1+1",
+            "\n=1+1",
+            " \t=1+1",
+        ];
+        $sheet = (new Spreadsheet)->getActiveSheet();
+
+        ExcelExportHelper::writeRow($sheet, 1, $values);
+
+        foreach ($values as $index => $value) {
+            $cell = $sheet->getCell(ExcelExportHelper::columnName($index + 1).'1');
+            $this->assertSame(DataType::TYPE_STRING, $cell->getDataType());
+            if (! str_contains($value, "\r")) {
+                $this->assertSame($value, $cell->getValue());
+            }
+        }
+    }
+
+    public function test_failed_workbook_creation_removes_its_temporary_file(): void
+    {
+        $temporaryFilesBefore = glob(sys_get_temp_dir().DIRECTORY_SEPARATOR.'export-*');
+        $spreadsheet = \Mockery::mock(new Spreadsheet)->makePartial();
+        $spreadsheet->shouldReceive('getSheetCount')->andThrow(new \RuntimeException('Expected test failure.'));
+
+        try {
+            ExcelExportHelper::downloadPath($spreadsheet);
+            $this->fail('Workbook creation should fail.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('Expected test failure.', $exception->getMessage());
+        }
+
+        $this->assertSame($temporaryFilesBefore, glob(sys_get_temp_dir().DIRECTORY_SEPARATOR.'export-*'));
+    }
 
     public function test_period_export_requires_authentication(): void
     {
@@ -81,6 +130,33 @@ class AttendanceExportTest extends TestCase
         unlink($tmp);
     }
 
+    public function test_untrusted_text_is_written_as_literal_text_in_period_annual_and_employee_exports(): void
+    {
+        $unit = $this->createUnit('TK');
+        $employee = $this->createEmployee($unit, 'TK-FORMULA', '=HYPERLINK("https://example.test","open")');
+        $employee->update(['position' => "\t=1+1"]);
+
+        $period = app(AttendancePeriodExportService::class)
+            ->buildSpreadsheet($unit->id, '2026-08-01', '2026-08-31')
+            ->getActiveSheet();
+        $this->assertSame('=HYPERLINK("https://example.test","open")', $period->getCell('C6')->getValue());
+        $this->assertSame(DataType::TYPE_STRING, $period->getCell('C6')->getDataType());
+        $this->assertSame("\t=1+1", $period->getCell('D6')->getValue());
+        $this->assertSame(DataType::TYPE_STRING, $period->getCell('D6')->getDataType());
+
+        $annual = app(AttendanceAnnualExportService::class)
+            ->buildSpreadsheet($unit->id, 2026)
+            ->getActiveSheet();
+        $this->assertSame(DataType::TYPE_STRING, $annual->getCell('C6')->getDataType());
+        $this->assertSame(DataType::TYPE_STRING, $annual->getCell('D6')->getDataType());
+
+        $detail = app(EmployeeAttendanceDetailExportService::class)
+            ->buildSpreadsheet($employee, '2026-08-01', '2026-08-31')
+            ->getActiveSheet();
+        $this->assertSame(DataType::TYPE_STRING, $detail->getCell('A3')->getDataType());
+        $this->assertSame(DataType::TYPE_STRING, $detail->getCell('B4')->getDataType());
+    }
+
     public function test_period_export_uses_service_values_and_inclusive_boundaries_for_all_unit_employees(): void
     {
         $unit = $this->createUnit('TK');
@@ -99,7 +175,7 @@ class AttendanceExportTest extends TestCase
         $this->createAttendanceRecord($employee, '2026-10-01', AttendanceStatus::Present, '07:00', '15:40', 0, 0);
         $this->createAttendanceRecord($otherEmployee, '2026-09-01', AttendanceStatus::Present, '07:00', '15:40', 0, 0);
 
-        $serviceRows = collect(app(\App\Services\Reports\AttendancePeriodReportService::class)->generate(
+        $serviceRows = collect(app(AttendancePeriodReportService::class)->generate(
             $unit->id,
             '2026-09-01',
             '2026-09-30',
@@ -166,7 +242,7 @@ class AttendanceExportTest extends TestCase
         $this->createAttendanceRecord($employee, '2027-09-01', AttendanceStatus::Present, '07:00', '15:40', 0, 0);
         $this->createAttendanceRecord($this->createEmployee($otherUnit, 'TK-201', 'Other unit'), '2026-09-01', AttendanceStatus::Present, '07:00', '15:40', 0, 0);
 
-        $serviceRow = collect(app(\App\Services\Reports\AttendanceAnnualReportService::class)->generate($unit->id, 2026)['data'])
+        $serviceRow = collect(app(AttendanceAnnualReportService::class)->generate($unit->id, 2026)['data'])
             ->firstWhere('employee_id', $employee->id);
 
         $this->actingAs(User::factory()->create());
@@ -308,6 +384,27 @@ class AttendanceExportTest extends TestCase
         $this->assertStringContainsString('detail-pegawai-rizki-wibowo-2026-08-01-2026-08-31.xlsx', $response->headers->get('content-disposition', ''));
     }
 
+    public function test_export_temporary_file_is_removed_after_download(): void
+    {
+        $unit = $this->createUnit('TK');
+        $this->actingAs(User::factory()->create());
+
+        $response = $this->get('/reports/period/export?unit_id='.$unit->id.'&start_date=2026-08-01&end_date=2026-08-31');
+        $response->assertOk();
+
+        $path = $response->baseResponse->getFile()->getPathname();
+        $this->assertFileExists($path);
+
+        ob_start();
+        try {
+            $response->baseResponse->sendContent();
+        } finally {
+            ob_end_clean();
+        }
+
+        $this->assertFileDoesNotExist($path);
+    }
+
     private function createUnit(string $code): Unit
     {
         return Unit::create(['name' => $code, 'code' => $code]);
@@ -322,6 +419,7 @@ class AttendanceExportTest extends TestCase
             'position' => 'Guru',
             'status' => EmployeeStatus::Active,
         ]);
+
         return $employee;
     }
 
@@ -370,7 +468,7 @@ class AttendanceExportTest extends TestCase
         ]);
     }
 
-    private function rowValues(\PhpOffice\PhpSpreadsheet\Worksheet\Worksheet $sheet, string $startCell, string $endCell): array
+    private function rowValues(Worksheet $sheet, string $startCell, string $endCell): array
     {
         return $sheet->rangeToArray($startCell.':'.$endCell, null, true, false)[0];
     }

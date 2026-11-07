@@ -10,6 +10,7 @@ use App\Models\Unit;
 use App\Models\User;
 use App\Models\WorkCalendar;
 use App\Models\WorkSchedule;
+use App\Services\HrdAccountService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -24,7 +25,23 @@ class SecurityHardeningTest extends TestCase
         $this->get('/employees')->assertRedirect('/login');
         $this->get('/reports/period?unit_id='.$unit->id.'&start_date=2026-08-01&end_date=2026-08-31')->assertRedirect('/login');
         $this->get('/reports/employee/'.$this->createEmployee($unit, 'TK-777', 'Guest User')->id.'/export?unit_id='.$unit->id.'&start_date=2026-08-01&end_date=2026-08-31')->assertRedirect('/login');
+        $this->get('/reports/annual/export?unit_id='.$unit->id.'&year=2026')->assertRedirect('/login');
+        $this->get('/reports/fingerprint-period/export?unit_id='.$unit->id.'&start_date=2026-08-01&end_date=2026-08-31')->assertRedirect('/login');
+        $this->post('/fingerprint-imports/preview')->assertRedirect('/login');
+        $this->post('/leave-imports/preview')->assertRedirect('/login');
         $this->post('/attendance/process', ['unit_id' => $unit->id, 'start_date' => '2026-08-01', 'end_date' => '2026-08-31'])->assertRedirect('/login');
+    }
+
+    public function test_authenticated_non_hrd_session_is_invalidated(): void
+    {
+        $hrd = User::factory()->create();
+        $otherUser = User::factory()->create();
+        app(HrdAccountService::class)->setUser($hrd);
+        $this->actingAs($otherUser);
+
+        $this->get('/dashboard')->assertRedirect('/login');
+
+        $this->assertGuest();
     }
 
     public function test_cross_unit_schedule_updates_and_deletes_are_rejected(): void

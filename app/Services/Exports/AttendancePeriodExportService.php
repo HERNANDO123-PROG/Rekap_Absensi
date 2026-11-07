@@ -25,16 +25,16 @@ class AttendancePeriodExportService
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Rekap Periode');
 
-        $sheet->setCellValue('A1', 'Unit:');
-        $sheet->setCellValue('B1', $unit->code ?? $unit->name);
-        $sheet->setCellValue('A2', 'Periode:');
-        $sheet->setCellValue('B2', CarbonImmutable::parse($startDate)->format('d-m-Y').' s/d '.CarbonImmutable::parse($endDate)->format('d-m-Y'));
+        ExcelExportHelper::writeValue($sheet, 'A1', 'Unit:');
+        ExcelExportHelper::writeValue($sheet, 'B1', $unit->code ?? $unit->name);
+        ExcelExportHelper::writeValue($sheet, 'A2', 'Periode:');
+        ExcelExportHelper::writeValue($sheet, 'B2', CarbonImmutable::parse($startDate)->format('d-m-Y').' s/d '.CarbonImmutable::parse($endDate)->format('d-m-Y'));
 
         $headers = ['No', 'ID Pegawai', 'Nama', 'Jabatan', 'Hari Kerja', 'Hadir', 'Terlambat', 'Pulang Awal', 'Total Finger', 'Izin', 'Sakit', 'Dinas', 'Izin Keluar', 'Alpha', 'Perlu Verifikasi'];
         $headerRow = 5;
         $column = 'A';
         foreach ($headers as $header) {
-            $sheet->setCellValue($column.$headerRow, $header);
+            ExcelExportHelper::writeValue($sheet, $column.$headerRow, $header);
             $sheet->getStyle($column.$headerRow)->getFont()->setBold(true);
             $column++;
         }
@@ -60,7 +60,7 @@ class AttendancePeriodExportService
                 $entry['perlu_verifikasi'] ?? 0,
             ];
 
-            $sheet->fromArray($data, null, 'A'.$row, true);
+            ExcelExportHelper::writeRow($sheet, $row, $data);
             $row++;
         }
 

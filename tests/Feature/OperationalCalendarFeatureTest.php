@@ -19,6 +19,7 @@ use App\Services\Attendance\AttendanceProcessingService;
 use App\Services\Calendar\CalendarResolver;
 use App\Services\NationalCalendarSyncService;
 use App\Services\Reports\AttendanceFingerprintPeriodReportService;
+use App\Services\WorkCalendarService;
 use App\Services\WorkSchedulePeriodService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -188,7 +189,7 @@ class OperationalCalendarFeatureTest extends TestCase
         }
     }
 
-    public function test_national_calendar_sync_is_idempotent_and_preserves_verified_events_without_applying_them(): void
+    public function test_national_calendar_sync_is_idempotent_and_applies_holidays_to_operational_calendar(): void
     {
         $unit = $this->unit('SD');
         WorkSchedule::query()->create([
@@ -198,32 +199,161 @@ class OperationalCalendarFeatureTest extends TestCase
             'start_time' => '08:00',
             'end_time' => '14:00',
         ]);
-        $url = 'https://date.nager.at/api/v3/PublicHolidays/2026/ID';
-        Http::fake([$url => Http::response([$this->apiEvent()], 200)]);
+        $url = 'https://indonesian-holidays.ahrulsyamil.com/holidays/2026';
+        Http::fake([$url => Http::response($this->apiResponse([
+            $this->apiEvent(),
+            $this->apiJointLeaveEvent(),
+        ]), 200)]);
         $service = app(NationalCalendarSyncService::class);
 
         $first = $service->sync(2026);
         $second = $service->sync(2026);
-        $this->assertSame(1, $first['created']);
-        $this->assertSame(1, $second['updated']);
-        $this->assertDatabaseCount('national_calendar_events', 1);
-        $this->assertSame(
-            'weekly_schedule',
-            app(CalendarResolver::class)->resolve($unit->id, '2026-01-01')['source'],
-        );
+        $this->assertSame(2, $first['created']);
+        $this->assertSame(2, $second['updated']);
+        $this->assertDatabaseCount('national_calendar_events', 2);
+        $resolvedHoliday = app(CalendarResolver::class)->resolve($unit->id, '2026-01-01');
+        $this->assertSame('calendar', $resolvedHoliday['source']);
+        $this->assertFalse($resolvedHoliday['is_working_day']);
+        $resolvedJointLeave = app(CalendarResolver::class)->resolve($unit->id, '2026-02-16');
+        $this->assertSame('calendar', $resolvedJointLeave['source']);
+        $this->assertFalse($resolvedJointLeave['is_working_day']);
+        $this->assertSame(2, $first['operational_created']);
+        $this->assertSame(0, $second['operational_created']);
 
-        $event = NationalCalendarEvent::query()->firstOrFail();
+        $event = NationalCalendarEvent::query()->whereDate('date', '2026-01-01')->firstOrFail();
         $event->update(['verification_status' => 'verified', 'local_name' => 'Nama manual terverifikasi']);
-        Http::fake([$url => Http::response([[
+        Http::fake([$url => Http::response($this->apiResponse([[
             ...$this->apiEvent(),
-            'localName' => 'Nama API terbaru',
-        ]], 200)]);
+            'name' => 'Nama API terbaru',
+            'description' => 'New Year holiday',
+        ]]), 200)]);
         $third = $service->sync(2026);
 
         $this->assertSame(1, $third['preserved_verified']);
         $this->assertSame('Nama manual terverifikasi', $event->fresh()->local_name);
         $this->assertSame('verified', $event->fresh()->verification_status);
-        $this->assertSame(0, WorkCalendar::query()->count());
+        $this->assertSame(2, WorkCalendar::query()->count());
+        $this->assertSame(
+            'Nama manual terverifikasi',
+            WorkCalendar::query()->firstOrFail()->title,
+        );
+        $this->assertSame($event->id, WorkCalendar::query()->firstOrFail()->national_calendar_event_id);
+
+        $calendar = WorkCalendar::query()->firstOrFail();
+        app(WorkCalendarService::class)->update($calendar, [
+            'unit_id' => $unit->id,
+            'date' => '2026-01-01',
+            'type' => WorkCalendarType::Holiday->value,
+            'title' => 'Libur yang diubah sekolah',
+            'description' => 'Keputusan operasional manual',
+            'is_working_day' => false,
+            'start_time' => null,
+            'end_time' => null,
+        ]);
+        $fourth = $service->sync(2026);
+
+        $this->assertSame(1, $fourth['operational_replaced_manual']);
+        $this->assertSame($event->id, $calendar->fresh()->national_calendar_event_id);
+        $this->assertSame('Nama manual terverifikasi', $calendar->fresh()->title);
+    }
+
+    public function test_national_sync_replaces_manual_entries_with_holidays_and_keeps_previous_notes(): void
+    {
+        $unit = $this->unit('SD');
+        WorkCalendar::query()->create([
+            'unit_id' => $unit->id,
+            'date' => '2026-01-01',
+            'type' => WorkCalendarType::SpecialWorkday,
+            'title' => 'Kegiatan sekolah yang sudah ditetapkan',
+            'is_working_day' => true,
+            'start_time' => '08:00',
+            'end_time' => '12:00',
+        ]);
+        Http::fake([
+            'https://indonesian-holidays.ahrulsyamil.com/holidays/2026' => Http::response(
+                $this->apiResponse([$this->apiEvent()]),
+                200,
+            ),
+        ]);
+
+        $result = app(NationalCalendarSyncService::class)->sync(2026);
+
+        $calendar = WorkCalendar::query()->firstOrFail();
+        $this->assertSame(0, $result['operational_conflicts']);
+        $this->assertSame(1, $result['operational_replaced_manual']);
+        $this->assertSame(0, $result['operational_updated']);
+        $this->assertSame('Tahun Baru Masehi', $calendar->title);
+        $this->assertFalse($calendar->is_working_day);
+        $this->assertStringContainsString('Kegiatan sekolah yang sudah ditetapkan', $calendar->description);
+        $this->assertNotNull($calendar->national_calendar_event_id);
+    }
+
+    public function test_national_sync_reuses_pending_legacy_event_and_keeps_its_operational_link(): void
+    {
+        $unit = $this->unit('SD');
+        $legacyEvent = NationalCalendarEvent::query()->create([
+            'country_code' => 'ID',
+            'date' => '2026-01-01',
+            'local_name' => 'Tahun Baru Masehi',
+            'name' => "New Year's Day",
+            'types' => ['Public'],
+            'verification_status' => 'pending',
+            'source' => 'Nager.Date',
+            'source_url' => 'https://date.nager.at/api/v3/PublicHolidays/2026/ID',
+            'last_synced_at' => now(),
+        ]);
+        $calendar = WorkCalendar::query()->create([
+            'unit_id' => $unit->id,
+            'date' => '2026-01-01',
+            'national_calendar_event_id' => $legacyEvent->id,
+            'type' => WorkCalendarType::Holiday,
+            'title' => 'Tahun Baru Masehi',
+            'is_working_day' => false,
+        ]);
+        Http::fake([
+            'https://indonesian-holidays.ahrulsyamil.com/holidays/2026' => Http::response(
+                $this->apiResponse([$this->apiEvent()]),
+                200,
+            ),
+        ]);
+
+        $result = app(NationalCalendarSyncService::class)->sync(2026);
+
+        $this->assertSame(0, $result['created']);
+        $this->assertSame(1, $result['updated']);
+        $this->assertDatabaseCount('national_calendar_events', 1);
+        $this->assertSame('SKB 3 Menteri', $legacyEvent->fresh()->source);
+        $this->assertSame($legacyEvent->id, $calendar->fresh()->national_calendar_event_id);
+        $this->assertSame('Tahun Baru Masehi', $calendar->fresh()->title);
+    }
+
+    public function test_sync_response_reports_manual_replacements_separately_from_api_updates(): void
+    {
+        $unit = $this->unit('SD');
+        WorkCalendar::query()->create([
+            'unit_id' => $unit->id,
+            'date' => '2026-01-01',
+            'type' => WorkCalendarType::SpecialWorkday,
+            'title' => 'Kegiatan sekolah',
+            'is_working_day' => true,
+            'start_time' => '08:00',
+            'end_time' => '12:00',
+        ]);
+        Http::fake([
+            'https://indonesian-holidays.ahrulsyamil.com/holidays/2026' => Http::response(
+                $this->apiResponse([$this->apiEvent()]),
+                200,
+            ),
+        ]);
+
+        $this->withoutMiddleware()
+            ->actingAs(User::factory()->create())
+            ->postJson('/national-calendar-events/sync', ['year' => 2026])
+            ->assertOk()
+            ->assertJsonPath(
+                'message',
+                'Sinkronisasi selesai: 0 agenda libur/cuti bersama baru ditambahkan, 1 agenda manual diganti dengan libur nasional, 0 agenda diperbarui.',
+            );
     }
 
     public function test_national_sync_route_requires_authentication_and_manual_operational_decisions_are_explicit(): void
@@ -239,13 +369,47 @@ class OperationalCalendarFeatureTest extends TestCase
 
     public function test_calendar_page_renders_calendar_controls_and_candidate_sources(): void
     {
-        $this->actingAs(User::factory()->create())
-            ->get(route('work-calendar.index'))
-            ->assertOk()
-            ->assertSee('Kalender nasional (Nager.Date)')
-            ->assertSee('Jadwal khusus periode')
+        $unit = $this->unit('SD');
+        WorkCalendar::query()->create([
+            'unit_id' => $unit->id,
+            'date' => '2026-01-01',
+            'type' => WorkCalendarType::Holiday,
+            'title' => 'Tahun Baru',
+            'is_working_day' => false,
+        ]);
+        WorkCalendar::query()->create([
+            'unit_id' => $this->unit('TK')->id,
+            'date' => '2026-01-01',
+            'type' => WorkCalendarType::Holiday,
+            'title' => 'Tahun Baru',
+            'is_working_day' => false,
+        ]);
+
+        $response = $this->withoutMiddleware()
+            ->actingAs(User::factory()->create())
+            ->get(route('work-calendar.index'));
+
+        $response->assertOk()
+            ->assertSeeText('Libur Nasional & Cuti Bersama')
             ->assertSee('Sinkronkan API')
-            ->assertSee('Simpan agenda');
+            ->assertDontSee('Nager.Date')
+            ->assertSee('Tambah Agenda / Hari Libur')
+            ->assertSee('calendar-agenda-table')
+            ->assertSee('Semua unit')
+            ->assertSee('calendar-row-actions__button--edit')
+            ->assertSee('calendar-row-actions__button--delete')
+            ->assertSee('aria-label="Edit agenda Tahun Baru untuk TK"', false)
+            ->assertSee('aria-label="Hapus agenda Tahun Baru untuk SD"', false)
+            ->assertSee('calendar-row-actions__icon')
+            ->assertDontSee('calendar-row-actions__unit-name')
+            ->assertDontSee('calendar-action-button--menu')
+            ->assertDontSee('<summary')
+            ->assertDontSee('Jadwal khusus periode')
+            ->assertDontSee('Tambah Jadwal Khusus Periode')
+            ->assertDontSee('Atur operasional')
+            ->assertDontSee('Catat verifikasi');
+
+        $this->assertSame(1, substr_count($response->getContent(), 'class="calendar-agenda-row"'));
     }
 
     public function test_verification_requires_an_official_source_reference_and_does_not_apply_a_holiday(): void
@@ -257,8 +421,8 @@ class OperationalCalendarFeatureTest extends TestCase
             'name' => "New Year's Day",
             'types' => ['Public'],
             'verification_status' => 'pending',
-            'source' => 'Nager.Date',
-            'source_url' => 'https://date.nager.at/api/v3/PublicHolidays/2026/ID',
+            'source' => 'SKB 3 Menteri',
+            'source_url' => 'https://www.kemenkopmk.go.id/keputusan',
             'last_synced_at' => now(),
         ]);
         $user = User::factory()->create();
@@ -328,10 +492,36 @@ class OperationalCalendarFeatureTest extends TestCase
     {
         return [
             'date' => '2026-01-01',
-            'localName' => 'Tahun Baru Masehi',
-            'name' => "New Year's Day",
-            'countryCode' => 'ID',
-            'types' => ['Public'],
+            'name' => 'Tahun Baru Masehi',
+            'type' => 'national_holiday',
+            'is_national' => true,
+            'description' => "New Year's Day",
+        ];
+    }
+
+    private function apiJointLeaveEvent(): array
+    {
+        return [
+            'date' => '2026-02-16',
+            'name' => 'Cuti Bersama Tahun Baru Imlek 2577 Kongzili',
+            'type' => 'joint_leave',
+            'is_national' => false,
+            'description' => null,
+        ];
+    }
+
+    private function apiResponse(array $events): array
+    {
+        return [
+            'meta' => [
+                'year' => 2026,
+                'sources' => [[
+                    'year' => 2026,
+                    'type' => 'skb',
+                    'url' => 'https://www.kemenkopmk.go.id/keputusan',
+                ]],
+            ],
+            'data' => $events,
         ];
     }
 

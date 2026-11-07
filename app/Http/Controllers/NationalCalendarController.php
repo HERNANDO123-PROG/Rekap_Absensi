@@ -18,7 +18,7 @@ class NationalCalendarController extends Controller
 
         return response()->json([
             'data' => NationalCalendarEvent::query()
-                ->where('country_code', config('services.nager_date.country', 'ID'))
+                ->where('country_code', 'ID')
                 ->whereYear('date', $validated['year'])
                 ->orderBy('date')
                 ->get(),
@@ -29,9 +29,16 @@ class NationalCalendarController extends Controller
     {
         $validated = $request->validate(['year' => ['required', 'integer', 'between:2000,2100']]);
 
+        $result = $sync->sync((int) $validated['year'], $request->user()?->id);
+
         return response()->json([
-            'data' => $sync->sync((int) $validated['year'], $request->user()?->id),
-            'message' => 'Kalender nasional berhasil disinkronkan. Data tetap menunggu keputusan operasional sekolah.',
+            'data' => $result,
+            'message' => sprintf(
+                'Sinkronisasi selesai: %d agenda libur/cuti bersama baru ditambahkan, %d agenda manual diganti dengan libur nasional, %d agenda diperbarui.',
+                $result['operational_created'],
+                $result['operational_replaced_manual'],
+                $result['operational_updated'],
+            ),
         ]);
     }
 

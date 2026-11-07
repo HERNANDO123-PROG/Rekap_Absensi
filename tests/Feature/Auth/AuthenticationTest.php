@@ -3,6 +3,7 @@
 namespace Tests\Feature\Auth;
 
 use App\Models\User;
+use App\Services\HrdAccountService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Volt\Volt;
 use Tests\TestCase;
@@ -23,6 +24,8 @@ class AuthenticationTest extends TestCase
     public function test_users_can_authenticate_using_the_login_screen(): void
     {
         $user = User::factory()->create();
+        app(HrdAccountService::class)->setUser($user);
+        $sessionId = session()->getId();
 
         $component = Volt::test('pages.auth.login')
             ->set('form.username', $user->name)
@@ -35,11 +38,13 @@ class AuthenticationTest extends TestCase
             ->assertRedirect(route('dashboard', absolute: false));
 
         $this->assertAuthenticated();
+        $this->assertNotSame($sessionId, session()->getId());
     }
 
     public function test_users_can_not_authenticate_with_invalid_password(): void
     {
         $user = User::factory()->create();
+        app(HrdAccountService::class)->setUser($user);
 
         $component = Volt::test('pages.auth.login')
             ->set('form.username', $user->name)
@@ -51,6 +56,43 @@ class AuthenticationTest extends TestCase
             ->assertHasErrors()
             ->assertNoRedirect();
 
+        $this->assertGuest();
+    }
+
+    public function test_non_hrd_users_cannot_authenticate(): void
+    {
+        $hrd = User::factory()->create();
+        $otherUser = User::factory()->create();
+        app(HrdAccountService::class)->setUser($hrd);
+
+        $component = Volt::test('pages.auth.login')
+            ->set('form.username', $otherUser->name)
+            ->set('form.password', 'password')
+            ->call('login');
+
+        $component->assertHasErrors()->assertNoRedirect();
+        $this->assertGuest();
+    }
+
+    public function test_login_attempts_are_rate_limited(): void
+    {
+        $user = User::factory()->create();
+        app(HrdAccountService::class)->setUser($user);
+
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            Volt::test('pages.auth.login')
+                ->set('form.username', $user->name)
+                ->set('form.password', 'wrong-password')
+                ->call('login')
+                ->assertHasErrors();
+        }
+
+        $component = Volt::test('pages.auth.login')
+            ->set('form.username', $user->name)
+            ->set('form.password', 'password')
+            ->call('login');
+
+        $component->assertHasErrors('form.username');
         $this->assertGuest();
     }
 

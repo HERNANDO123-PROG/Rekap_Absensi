@@ -6,10 +6,13 @@ use App\Enums\AbsenceReason;
 use App\Enums\ImportBatchStatus;
 use App\Enums\LeaveType;
 use App\Enums\MatchingStatus;
+use App\Models\Employee;
 use App\Models\LeaveImportBatch;
 use App\Models\Unit;
-use App\Services\EmployeeMatchingService;
+use App\Services\EmployeeMatchResult;
+use App\Services\Attendance\AttendanceProcessingService;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -21,14 +24,14 @@ class LeaveImportService
     public function __construct(
         private readonly LeaveFormFileReader $reader,
         private readonly LeaveFormRowParser $rowParser,
-        private readonly EmployeeMatchingService $matching,
+        private readonly AttendanceProcessingService $attendance,
     ) {}
 
     public function preview(UploadedFile $file, int $unitId): array
     {
         $context = $this->inspect($file, $unitId);
         $validRows = array_values(array_filter($context['rows'], static fn (array $row): bool => $row['errors'] === []));
-        $matchResults = $this->matching->findByNames($unitId, array_column($validRows, 'normalized_name'));
+        $matchResults = $this->findByNips($unitId, array_column($context['rows'], 'nip'));
         $matchingCounts = [
             MatchingStatus::Matched->value => 0,
             MatchingStatus::Unmatched->value => 0,
@@ -37,33 +40,40 @@ class LeaveImportService
         $leaveTypeDistribution = array_fill_keys(array_map(static fn (LeaveType $type): string => $type->value, LeaveType::cases()), 0);
         $absenceReasonDistribution = array_fill_keys(array_map(static fn (AbsenceReason $reason): string => $reason->value, AbsenceReason::cases()), 0);
         $validationErrors = [];
+        $previewRows = [];
 
         foreach ($context['rows'] as $row) {
+            $match = $row['nip'] !== '' ? $matchResults[$row['nip']] : null;
+
             if ($row['errors'] !== []) {
                 $validationErrors[] = [
                     'row' => $row['source_row'],
                     'messages' => $row['errors'],
+                    'nip' => $row['nip'],
                     'raw_name' => $row['raw_name'],
                     'raw_date' => $row['raw_date'],
                     'raw_time' => $row['raw_time'],
                     'raw_leave_type' => $row['raw_leave_type'],
                 ];
 
+                $previewRows[] = $this->previewRow($row, null, false);
+
                 continue;
             }
 
-            $match = $matchResults[$row['normalized_name']];
             $matchingCounts[$match->status->value]++;
             $leaveTypeDistribution[$row['leave_type']]++;
 
             if ($row['absence_reason'] !== null) {
                 $absenceReasonDistribution[$row['absence_reason']]++;
             }
+
+            $previewRows[] = $this->previewRow($row, $match, true);
         }
 
         $duplicateHeaderFields = array_values(array_intersect(
             $context['header_mapping']['ambiguous_fields'],
-            ['raw_name', 'position', 'request_date', 'request_time', 'leave_type', 'description'],
+            ['nip', 'raw_name', 'position', 'request_date', 'request_time', 'leave_type', 'description'],
         ));
 
         return [
@@ -78,6 +88,7 @@ class LeaveImportService
             'period_start' => $context['period_start'],
             'period_end' => $context['period_end'],
             'total_rows' => count($context['rows']),
+            'preview_rows' => $previewRows,
             'valid_rows' => count($validRows),
             'invalid_rows' => count($context['rows']) - count($validRows),
             'matched' => $matchingCounts[MatchingStatus::Matched->value],
@@ -97,7 +108,7 @@ class LeaveImportService
         $this->assertNotImported($unitId, $context['file_hash']);
 
         $validRows = array_values(array_filter($context['rows'], static fn (array $row): bool => $row['errors'] === []));
-        $matchResults = $this->matching->findByNames($unitId, array_column($validRows, 'normalized_name'));
+        $matchResults = $this->findByNips($unitId, array_column($validRows, 'nip'));
         $batch = null;
 
         try {
@@ -116,6 +127,7 @@ class LeaveImportService
 
                 $successRows = 0;
                 $requests = [];
+                $processingTargets = [];
                 $errorDetails = [];
                 $now = now();
 
@@ -126,11 +138,12 @@ class LeaveImportService
                         continue;
                     }
 
-                    $match = $matchResults[$row['normalized_name']];
+                    $match = $matchResults[$row['nip']];
                     $requests[] = [
                         'import_batch_id' => $batch->id,
                         'unit_id' => $context['unit']->id,
                         'employee_id' => $match->employee?->id,
+                        'nip' => $row['nip'],
                         'raw_name' => $row['raw_name'],
                         'normalized_name' => $row['normalized_name'],
                         'position' => $row['position'],
@@ -146,6 +159,12 @@ class LeaveImportService
                         'updated_at' => $now,
                     ];
                     $successRows++;
+                    if ($match->employee !== null) {
+                        $processingTargets[$match->employee->id.'|'.$row['request_date']] = [
+                            'employee_id' => $match->employee->id,
+                            'date' => $row['request_date'],
+                        ];
+                    }
 
                     if (count($requests) >= 500) {
                         DB::table('leave_requests')->insert($requests);
@@ -157,11 +176,18 @@ class LeaveImportService
                     DB::table('leave_requests')->insert($requests);
                 }
 
+                $processingSummary = $this->processImportedAttendance(
+                    $context['unit']->id,
+                    array_values($processingTargets),
+                    $importedBy,
+                );
+
                 $batch->update([
                     'status' => ImportBatchStatus::Completed,
                     'success_rows' => $successRows,
                     'error_rows' => count($errorDetails),
                     'error_details' => $errorDetails,
+                    'processing_summary' => $processingSummary,
                 ]);
 
                 return $batch->refresh();
@@ -194,6 +220,55 @@ class LeaveImportService
         }
     }
 
+    private function processImportedAttendance(int $unitId, array $targets, ?int $userId): array
+    {
+        $summary = [
+            'total' => count($targets),
+            'created' => 0,
+            'updated' => 0,
+            'needs_verification' => 0,
+            'skipped_ineligible' => 0,
+            'preserved_for_review' => 0,
+            'failed' => 0,
+            'failed_cases' => [],
+        ];
+
+        foreach ($targets as $target) {
+            try {
+                $result = $this->attendance->processEmployeeDate(
+                    $unitId,
+                    $target['employee_id'],
+                    $target['date'],
+                    $userId,
+                );
+
+                if ($result['status'] === 'skipped_ineligible_employee') {
+                    $summary['skipped_ineligible']++;
+
+                    continue;
+                }
+
+                $summary[$result['created'] ? 'created' : 'updated']++;
+                $summary['needs_verification'] += (int) ($result['needs_verification'] ?? false);
+                $summary['preserved_for_review'] += (int) ($result['preserved_for_review'] ?? false);
+            } catch (Throwable $exception) {
+                $summary['failed']++;
+                $summary['failed_cases'][] = [
+                    'employee_id' => $target['employee_id'],
+                    'date' => $target['date'],
+                ];
+                Log::error('Leave import attendance processing failed.', [
+                    'unit_id' => $unitId,
+                    'employee_id' => $target['employee_id'],
+                    'date' => $target['date'],
+                    'exception' => $exception,
+                ]);
+            }
+        }
+
+        return $summary;
+    }
+
     private function inspect(UploadedFile $file, int $unitId): array
     {
         $unit = Unit::query()->find($unitId);
@@ -221,12 +296,15 @@ class LeaveImportService
         }
 
         $data = $this->reader->read($path, $extension);
-        $requiredHeaderFields = ['raw_name', 'position', 'request_date', 'request_time', 'leave_type', 'description'];
+        $requiredHeaderFields = ['nip', 'raw_name', 'position', 'request_date', 'request_time', 'leave_type', 'description'];
         $missingRequired = array_values(array_diff($requiredHeaderFields, array_keys($data['header_mapping']['mapping'])));
         $ambiguousRequired = array_values(array_intersect($requiredHeaderFields, $data['header_mapping']['ambiguous_fields']));
 
         if ($missingRequired !== [] || $ambiguousRequired !== []) {
-            throw new LeaveImportException('Required Google Form headers are missing or ambiguous.', [
+            $message = in_array('nip', $missingRequired, true)
+                ? 'Kolom NIP wajib tersedia. File lama tanpa NIP tidak dapat digunakan untuk pencocokan izin.'
+                : 'Required Google Form headers are missing or ambiguous.';
+            throw new LeaveImportException($message, [
                 'missing_fields' => $missingRequired,
                 'ambiguous_fields' => $ambiguousRequired,
                 'detected_headers' => $data['header_mapping']['detected_headers'],
@@ -273,6 +351,7 @@ class LeaveImportService
         return [
             'row' => $row['source_row'],
             'messages' => $row['errors'],
+            'nip' => $row['nip'],
             'raw_name' => $row['raw_name'],
             'raw_leave_type' => $row['raw_leave_type'],
             'raw_date' => $row['raw_date'],
@@ -295,6 +374,54 @@ class LeaveImportService
             ->where('file_hash', $fileHash)
             ->where('status', ImportBatchStatus::Completed->value)
             ->exists();
+    }
+
+    private function findByNips(int $unitId, array $nips): array
+    {
+        $nips = array_values(array_unique(array_filter(
+            array_map(static fn ($nip): string => trim((string) $nip), $nips),
+            static fn (string $nip): bool => $nip !== '',
+        )));
+
+        if ($nips === []) {
+            return [];
+        }
+
+        $candidates = Employee::query()
+            ->where('unit_id', $unitId)
+            ->where('status', 'active')
+            ->whereIn('nip', $nips)
+            ->orderBy('id')
+            ->get()
+            ->groupBy('nip');
+
+        return array_combine(
+            $nips,
+            array_map(
+                static fn (string $nip): EmployeeMatchResult => EmployeeMatchResult::fromCandidates(
+                    $candidates->get($nip, new Collection),
+                ),
+                $nips,
+            ),
+        );
+    }
+
+    private function previewRow(array $row, ?EmployeeMatchResult $match, bool $isValid): array
+    {
+        $status = ! $isValid
+            ? 'invalid'
+            : ($match?->status->value ?? MatchingStatus::Unmatched->value);
+
+        return [
+            'nip' => $row['nip'],
+            'name' => $row['raw_name'],
+            'position' => $row['position'],
+            'date' => $row['request_date'] ?? (string) ($row['raw_date'] ?? ''),
+            'leave_type' => $row['raw_leave_type'],
+            'description' => $row['description'],
+            'status' => $status,
+            'errors' => $row['errors'],
+        ];
     }
 
     private function safeFilename(string $filename): string

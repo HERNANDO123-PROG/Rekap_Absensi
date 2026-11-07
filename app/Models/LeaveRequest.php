@@ -22,6 +22,7 @@ class LeaveRequest extends Model
         'created_by',
         'unit_id',
         'employee_id',
+        'nip',
         'raw_name',
         'normalized_name',
         'position',

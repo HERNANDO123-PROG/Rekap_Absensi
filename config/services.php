@@ -35,9 +35,8 @@ return [
         ],
     ],
 
-    'nager_date' => [
-        'base_url' => env('NAGER_DATE_BASE_URL', 'https://date.nager.at/api/v3'),
-        'country' => env('NAGER_DATE_COUNTRY', 'ID'),
+    'indonesian_holidays' => [
+        'base_url' => env('INDONESIAN_HOLIDAYS_API_BASE_URL', 'https://indonesian-holidays.ahrulsyamil.com'),
     ],
 
 ];

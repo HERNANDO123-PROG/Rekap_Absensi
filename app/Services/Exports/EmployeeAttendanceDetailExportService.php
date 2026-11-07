@@ -18,14 +18,14 @@ class EmployeeAttendanceDetailExportService
 
         $detailSheet = $spreadsheet->getActiveSheet();
         $detailSheet->setTitle('Detail Absensi');
-        $detailSheet->setCellValue('A3', $report['employee']['name'] ?? $employee->displayName());
-        $detailSheet->setCellValue('B3', $employee->id);
-        $detailSheet->setCellValue('A4', 'Jabatan');
-        $detailSheet->setCellValue('B4', $employee->position ?? '');
-        $detailSheet->setCellValue('A5', 'Unit');
-        $detailSheet->setCellValue('B5', $report['employee']['unit'] ?? ($employee->unit?->code ?? $employee->unit?->name ?? ''));
-        $detailSheet->setCellValue('A6', 'Periode');
-        $detailSheet->setCellValue('B6', CarbonImmutable::parse($startDate)->format('d-m-Y').' s/d '.CarbonImmutable::parse($endDate)->format('d-m-Y'));
+        ExcelExportHelper::writeValue($detailSheet, 'A3', $report['employee']['name'] ?? $employee->displayName());
+        ExcelExportHelper::writeValue($detailSheet, 'B3', $employee->id);
+        ExcelExportHelper::writeValue($detailSheet, 'A4', 'Jabatan');
+        ExcelExportHelper::writeValue($detailSheet, 'B4', $employee->position ?? '');
+        ExcelExportHelper::writeValue($detailSheet, 'A5', 'Unit');
+        ExcelExportHelper::writeValue($detailSheet, 'B5', $report['employee']['unit'] ?? ($employee->unit?->code ?? $employee->unit?->name ?? ''));
+        ExcelExportHelper::writeValue($detailSheet, 'A6', 'Periode');
+        ExcelExportHelper::writeValue($detailSheet, 'B6', CarbonImmutable::parse($startDate)->format('d-m-Y').' s/d '.CarbonImmutable::parse($endDate)->format('d-m-Y'));
 
         $headers = ['Tanggal', 'Hari', 'Status', 'Masuk', 'Keluar', 'Terlambat (menit)', 'Pulang Awal (menit)', 'Alasan', 'Perlu Verifikasi', 'Catatan'];
         $headerRow = 7;
@@ -41,7 +41,7 @@ class EmployeeAttendanceDetailExportService
             $intervals = $entry['intervals'] ?? [];
             $exitDurations = array_values(array_map(fn ($interval) => (int) ($interval['duration_minutes'] ?? 0), $intervals));
             $totalExitMinutes = array_sum($exitDurations);
-            $detailSheet->fromArray([
+            ExcelExportHelper::writeRow($detailSheet, $row, [
                 $entry['date'] ?? '',
                 CarbonImmutable::parse($entry['date'])->translatedFormat('l') ?? '',
                 $this->stringify($entry['status'] ?? ''),
@@ -52,7 +52,7 @@ class EmployeeAttendanceDetailExportService
                 '',
                 '',
                 $totalExitMinutes > 0 ? 'Izin keluar: '.$totalExitMinutes.' menit' : '',
-            ], null, 'A'.$row);
+            ]);
             $row++;
         }
 
@@ -75,7 +75,7 @@ class EmployeeAttendanceDetailExportService
         $intervalRow = 7;
         foreach ($report['daily'] ?? [] as $entry) {
             foreach ($entry['intervals'] ?? [] as $interval) {
-                $intervalSheet->fromArray([
+                ExcelExportHelper::writeRow($intervalSheet, $intervalRow, [
                     $entry['date'] ?? '',
                     $this->stringify($interval['type'] ?? ''),
                     $interval['start_time'] ?? '',
@@ -83,7 +83,7 @@ class EmployeeAttendanceDetailExportService
                     $interval['duration_minutes'] ?? 0,
                     $this->stringify($interval['source'] ?? ''),
                     $interval['notes'] ?? '',
-                ], null, 'A'.$intervalRow);
+                ]);
                 $intervalRow++;
             }
         }
@@ -101,13 +101,13 @@ class EmployeeAttendanceDetailExportService
         $anomalyRow = 7;
         foreach ($report['daily'] ?? [] as $entry) {
             foreach ($entry['anomalies'] ?? [] as $anomaly) {
-                $anomalySheet->fromArray([
+                ExcelExportHelper::writeRow($anomalySheet, $anomalyRow, [
                     $entry['date'] ?? '',
                     $this->stringify($anomaly['type'] ?? ''),
                     $this->stringify($anomaly['severity'] ?? ''),
                     $anomaly['message'] ?? '',
                     $anomaly['is_resolved'] ? 'Ya' : 'Tidak',
-                ], null, 'A'.$anomalyRow);
+                ]);
                 $anomalyRow++;
             }
         }

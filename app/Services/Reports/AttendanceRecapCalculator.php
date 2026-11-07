@@ -23,6 +23,8 @@ class AttendanceRecapCalculator
             && $status !== AttendanceStatus::Holiday->value;
         $isNonAttendanceStatus = in_array($status, [
             AttendanceStatus::OfficialDuty->value,
+            AttendanceStatus::Permission->value,
+            AttendanceStatus::Sick->value,
             AttendanceStatus::Absent->value,
             AttendanceStatus::Holiday->value,
         ], true);

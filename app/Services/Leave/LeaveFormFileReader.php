@@ -102,6 +102,12 @@ class LeaveFormFileReader
                 $cell = $sheet->getCell([$column, $rowNumber]);
                 $rawValue = $cell->getValue();
                 $parseValue = $rawValue;
+                $nipColumn = $best['header_mapping']['mapping']['nip'] ?? null;
+
+                if ($nipColumn !== null && $column - 1 === $nipColumn) {
+                    $rawValue = $cell->getFormattedValue();
+                    $parseValue = $rawValue;
+                }
 
                 if (is_numeric($rawValue) && ExcelDate::isDateTime($cell)) {
                     $parseValue = ExcelDate::excelToDateTimeObject((float) $rawValue);

@@ -239,6 +239,7 @@ class AttendanceProcessingService
             if (
                 $record !== null
                 && ($record->needs_verification || $record->status === AttendanceStatus::NeedsVerification)
+                && $leave === null
             ) {
                 return [
                     'employee_id' => $employee->id,

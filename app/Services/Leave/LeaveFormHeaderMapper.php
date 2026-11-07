@@ -5,11 +5,13 @@ namespace App\Services\Leave;
 class LeaveFormHeaderMapper
 {
     private const HEADER_ALIASES = [
+        'nip' => ['NIP', 'NIP Pegawai', 'Nomor Induk Pegawai'],
         'raw_name' => ['Nama Lengkap dan Gelar'],
         'position' => ['Jabatan'],
         'request_date' => ['Tanggal Pengajuan Izin'],
         'request_time' => [
             'Jam Kepulangan / Jam Perkiraan Kehadiran / Jam Kembali (jika tidak hadir/Dinas maka tulis 00.00)',
+            'Jam Kepulangan / Jam Perkiraan Kehadiran / Jam Kembali',
         ],
         'leave_type' => ['Keperluan Izin'],
         'description' => ['Keterangan Izin (Jelaskan)'],
@@ -17,6 +19,7 @@ class LeaveFormHeaderMapper
     ];
 
     private const REQUIRED_FIELDS = [
+        'nip',
         'raw_name',
         'position',
         'request_date',

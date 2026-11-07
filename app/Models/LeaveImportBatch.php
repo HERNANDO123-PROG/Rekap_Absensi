@@ -25,6 +25,7 @@ class LeaveImportBatch extends Model
         'success_rows',
         'error_rows',
         'error_details',
+        'processing_summary',
     ];
 
     protected $hidden = ['completed_file_hash'];
@@ -40,6 +41,7 @@ class LeaveImportBatch extends Model
             'success_rows' => 'integer',
             'error_rows' => 'integer',
             'error_details' => 'array',
+            'processing_summary' => 'array',
         ];
     }
 

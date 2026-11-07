@@ -71,13 +71,22 @@ document.addEventListener('submit', async (event) => {
     showStatus(form, 'Menyimpan...');
 
     try {
+        const method = form.dataset.method || 'POST';
+        const body = new FormData(form);
+
+        if (method === 'PUT') {
+            body.delete('date_from');
+            body.delete('date_to');
+            body.set('date', form.querySelector('[name="date_from"]').value);
+        }
+
         const response = await fetch(form.dataset.endpoint, {
-            method: form.dataset.method || 'POST',
+            method,
             headers: {
                 Accept: 'application/json',
                 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
             },
-            body: new FormData(form),
+            body,
         });
         const payload = await response.json().catch(() => ({}));
 
@@ -105,82 +114,74 @@ document.addEventListener('submit', async (event) => {
 });
 
 document.addEventListener('click', (event) => {
-    const editButton = event.target.closest('[data-edit-period]');
-    const cancelButton = event.target.closest('[data-cancel-period-edit]');
-    const nationalEventButton = event.target.closest('[data-apply-national-event]');
+    const openCalendarButton = event.target.closest('[data-open-calendar-dialog]');
     const editCalendarButton = event.target.closest('[data-edit-calendar]');
-    const cancelCalendarButton = event.target.closest('[data-cancel-calendar-edit]');
-    const form = document.querySelector('#schedule-period-form');
+    const closeCalendarButton = event.target.closest('[data-close-calendar-dialog]');
+    const calendarDialog = document.querySelector('#calendar-entry-dialog');
+    const calendarForm = document.querySelector('#calendar-entry-form');
 
-    if (nationalEventButton) {
-        const calendarForm = document.querySelector('#calendar-entry-form');
-        if (!calendarForm) return;
+    if (openCalendarButton && calendarDialog && calendarForm) {
+        const today = new Date();
+        const localToday = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+        calendarForm.reset();
         delete calendarForm.dataset.method;
         calendarForm.dataset.endpoint = calendarForm.dataset.storeEndpoint;
+        calendarForm.querySelector('[name="date_from"]').value = localToday;
+        calendarForm.querySelector('[name="date_to"]').value = localToday;
         calendarForm.querySelector('button[type="submit"]').textContent = 'Simpan agenda';
-        calendarForm.querySelector('[data-cancel-calendar-edit]').classList.add('hidden');
-        calendarForm.querySelector('[name="date"]').value = nationalEventButton.dataset.date;
-        calendarForm.querySelector('[name="title"]').value = nationalEventButton.dataset.title;
-        calendarForm.querySelector('[name="type"]').value = 'holiday';
-        calendarForm.querySelector('[name="is_working_day"][type="checkbox"]').checked = false;
-        calendarForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        calendarForm.querySelector('[name="unit_id"]').focus();
+        syncCalendarTimeFields(calendarForm);
+        calendarDialog.showModal();
+        calendarForm.querySelector('[name="title"]').focus();
         return;
     }
 
-    if (editCalendarButton || cancelCalendarButton) {
-        const calendarForm = document.querySelector('#calendar-entry-form');
-        if (!calendarForm) return;
-        if (editCalendarButton) {
-            calendarForm.dataset.endpoint = editCalendarButton.dataset.endpoint;
-            calendarForm.dataset.method = 'PUT';
-            calendarForm.querySelector('[name="unit_id"]').value = editCalendarButton.dataset.unit;
-            calendarForm.querySelector('[name="date"]').value = editCalendarButton.dataset.date;
-            calendarForm.querySelector('[name="type"]').value = editCalendarButton.dataset.type;
-            calendarForm.querySelector('[name="title"]').value = editCalendarButton.dataset.title || '';
-            calendarForm.querySelector('[name="description"]').value = editCalendarButton.dataset.description || '';
-            calendarForm.querySelector('[name="is_working_day"][type="checkbox"]').checked = editCalendarButton.dataset.working === '1';
-            calendarForm.querySelector('[name="start_time"]').value = editCalendarButton.dataset.start;
-            calendarForm.querySelector('[name="end_time"]').value = editCalendarButton.dataset.end;
-            calendarForm.querySelector('button[type="submit"]').textContent = 'Perbarui agenda';
-            calendarForm.querySelector('[data-cancel-calendar-edit]').classList.remove('hidden');
-            calendarForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        } else {
-            calendarForm.reset();
-            delete calendarForm.dataset.method;
-            calendarForm.dataset.endpoint = calendarForm.dataset.storeEndpoint;
-            calendarForm.querySelector('button[type="submit"]').textContent = 'Simpan agenda';
-            cancelCalendarButton.classList.add('hidden');
-        }
+    if (editCalendarButton && calendarDialog && calendarForm) {
+        calendarForm.reset();
+        calendarForm.dataset.endpoint = editCalendarButton.dataset.endpoint;
+        calendarForm.dataset.method = 'PUT';
+        calendarForm.querySelector('[name="unit_id"]').value = editCalendarButton.dataset.unit;
+        calendarForm.querySelector('[name="date_from"]').value = editCalendarButton.dataset.date;
+        calendarForm.querySelector('[name="date_to"]').value = editCalendarButton.dataset.date;
+        calendarForm.querySelector('[name="date"]').value = editCalendarButton.dataset.date;
+        calendarForm.querySelector('[name="type"]').value = editCalendarButton.dataset.type;
+        calendarForm.querySelector('[name="title"]').value = editCalendarButton.dataset.title || '';
+        calendarForm.querySelector('[name="description"]').value = editCalendarButton.dataset.description || '';
+        calendarForm.querySelector('[name="is_working_day"]').value = editCalendarButton.dataset.working;
+        calendarForm.querySelector('[name="start_time"]').value = editCalendarButton.dataset.start;
+        calendarForm.querySelector('[name="end_time"]').value = editCalendarButton.dataset.end;
+        calendarForm.querySelector('button[type="submit"]').textContent = 'Perbarui agenda';
+        syncCalendarTimeFields(calendarForm);
+        calendarDialog.showModal();
+        calendarForm.querySelector('[name="title"]').focus();
         return;
     }
 
-    if (!form) return;
-
-    if (editButton) {
-        form.dataset.endpoint = editButton.dataset.endpoint;
-        form.dataset.method = 'PUT';
-        form.querySelector('[name="name"]').value = editButton.dataset.name;
-        form.querySelector('[name="unit_id"]').value = editButton.dataset.unit || '';
-        const category = form.querySelector('[name="work_schedule_category_id"]');
-        category.value = editButton.dataset.category;
-        category.dispatchEvent(new Event('change', { bubbles: true }));
-        form.querySelector('[name="work_schedule_profile_id"]').value = editButton.dataset.profile;
-        form.querySelector('[name="start_date"]').value = editButton.dataset.start;
-        form.querySelector('[name="end_date"]').value = editButton.dataset.end;
-        form.querySelector('[name="is_active"]').value = editButton.dataset.active;
-        form.querySelector('button[type="submit"]').textContent = 'Perbarui jadwal periode';
-        form.querySelector('[data-cancel-period-edit]').classList.remove('hidden');
-        form.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    } else if (cancelButton) {
-        form.reset();
-        delete form.dataset.method;
-        form.dataset.endpoint = form.dataset.storeEndpoint;
-        form.querySelector('button[type="submit"]').textContent = 'Simpan jadwal periode';
-        cancelButton.classList.add('hidden');
-        const category = form.querySelector('[name="work_schedule_category_id"]');
-        category.dispatchEvent(new Event('change', { bubbles: true }));
+    if (closeCalendarButton) {
+        calendarDialog?.close();
+        return;
     }
+
+});
+
+const syncCalendarTimeFields = (form) => {
+    const impact = form.querySelector('[name="is_working_day"]');
+    const timeFields = form.querySelector('[data-calendar-time-fields]');
+    const isWorking = impact?.value === '1';
+
+    timeFields?.classList.toggle('hidden', !isWorking);
+    timeFields?.querySelectorAll('input').forEach((input) => {
+        input.required = isWorking;
+    });
+};
+
+document.querySelectorAll('#calendar-entry-form [data-calendar-impact]').forEach((impact) => {
+    syncCalendarTimeFields(impact.form);
+    impact.addEventListener('change', () => syncCalendarTimeFields(impact.form));
+});
+
+document.querySelector('#calendar-entry-dialog')?.addEventListener('click', (event) => {
+    if (event.target === event.currentTarget) event.currentTarget.close();
 });
 
 const massProfileDialog = document.querySelector('#mass-profile-dialog');
@@ -634,6 +635,230 @@ document.addEventListener('reset', (event) => {
         preview.replaceChildren();
         preview.hidden = true;
     }
+});
+
+const leaveImportStatusLabels = {
+    matched: 'NIP cocok',
+    unmatched: 'NIP tidak ditemukan',
+    ambiguous: 'NIP duplikat di master',
+    invalid: 'Data tidak valid',
+};
+
+const leaveImportSummary = (container, entries) => {
+    container.replaceChildren(...entries.map(([label, value]) => {
+        const item = document.createElement('div');
+        item.className = 'rounded-lg border border-slate-200 bg-slate-50 px-3 py-2';
+
+        const heading = document.createElement('p');
+        heading.className = 'text-xs text-slate-500';
+        heading.textContent = label;
+
+        const detail = document.createElement('p');
+        detail.className = 'mt-0.5 break-words text-sm font-semibold text-slate-800';
+        detail.textContent = value === null || value === undefined || value === '' ? '-' : String(value);
+
+        item.append(heading, detail);
+        return item;
+    }));
+};
+
+const renderLeaveImportPreview = (form, data) => {
+    const preview = form.parentElement.querySelector('[data-leave-import-preview]');
+    const summary = preview.querySelector('[data-leave-import-summary]');
+    const rows = preview.querySelector('[data-leave-import-preview-rows]');
+    const result = preview.querySelector('[data-leave-import-result]');
+    const importButton = form.querySelector('[data-import-confirm]');
+    const unitName = data.unit?.code || data.unit?.name || '-';
+
+    leaveImportSummary(summary, [
+        ['File', data.filename],
+        ['Unit', unitName],
+        ['Total baris', data.total_rows],
+        ['NIP cocok', data.matched],
+        ['NIP tidak ditemukan', data.unmatched],
+        ['Data valid', data.valid_rows],
+        ['Data tidak valid', data.invalid_rows],
+    ]);
+
+    rows.replaceChildren(...(data.preview_rows || []).map((row) => {
+        const tableRow = document.createElement('tr');
+        const status = leaveImportStatusLabels[row.status] || row.status || 'Tidak diketahui';
+        const values = [row.nip, row.name, row.position, row.date, row.leave_type, row.description, status];
+
+        values.forEach((value, index) => {
+            const cell = document.createElement('td');
+            cell.className = 'max-w-64 px-3 py-2 align-top text-slate-700';
+            cell.textContent = value === null || value === undefined || value === '' ? '-' : String(value);
+            if (index === 6) {
+                cell.classList.add(row.status === 'matched' ? 'font-semibold' : 'font-medium');
+                cell.classList.add(row.status === 'matched' ? 'text-emerald-700' : row.status === 'invalid' ? 'text-rose-700' : 'text-amber-700');
+                if (row.errors?.length) cell.title = row.errors.join(' ');
+            }
+            tableRow.append(cell);
+        });
+
+        return tableRow;
+    }));
+
+    result.hidden = true;
+    result.textContent = '';
+    preview.hidden = false;
+    form.dataset.previewKey = JSON.stringify({
+        file: form.querySelector('[name="file"]').files[0]?.name,
+        size: form.querySelector('[name="file"]').files[0]?.size,
+        modified: form.querySelector('[name="file"]').files[0]?.lastModified,
+        unit: form.querySelector('[name="unit_id"]').value,
+    });
+    const hasValidRows = Number(data.valid_rows) > 0;
+    importButton.hidden = Boolean(data.already_imported) || !hasValidRows;
+    form.dataset.previewReady = !data.already_imported && hasValidRows ? 'true' : 'false';
+
+    if (data.already_imported) {
+        showStatus(form, 'File ini sudah pernah diimpor untuk unit tersebut.', true);
+    } else if (!hasValidRows) {
+        showStatus(form, 'Tidak ada baris valid untuk diimpor.', true);
+    } else {
+        showStatus(form, 'Preview selesai. Periksa data sebelum impor.');
+    }
+};
+
+document.addEventListener('submit', async (event) => {
+    const form = event.target.closest('form[data-leave-import-form]');
+    if (!form) return;
+
+    event.preventDefault();
+    const action = event.submitter?.value || 'preview';
+    const isPreview = action === 'preview';
+    const importButton = form.querySelector('[data-import-confirm]');
+    const file = form.querySelector('[name="file"]').files[0];
+    const previewKey = JSON.stringify({
+        file: file?.name,
+        size: file?.size,
+        modified: file?.lastModified,
+        unit: form.querySelector('[name="unit_id"]').value,
+    });
+
+    if (!isPreview && (form.dataset.previewReady !== 'true' || form.dataset.previewKey !== previewKey)) {
+        showStatus(form, 'Jalankan preview kembali setelah mengganti file atau unit.', true);
+        importButton.hidden = true;
+        return;
+    }
+
+    const output = form.parentElement.querySelector('[data-leave-import-preview]');
+    setBusy(form, true);
+    showStatus(form, isPreview ? 'Memeriksa file...' : 'Mengimpor data izin...');
+
+    try {
+        const response = await fetch(isPreview ? form.dataset.previewEndpoint : form.dataset.importEndpoint, {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+            },
+            body: new FormData(form),
+        });
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+            if (isPreview) {
+                form.dataset.previewReady = 'false';
+                delete form.dataset.previewKey;
+                importButton.hidden = true;
+                output.hidden = true;
+            }
+            showStatus(form, responseMessage(payload, response), true);
+            return;
+        }
+
+        if (isPreview) {
+            renderLeaveImportPreview(form, payload.data || {});
+            return;
+        }
+
+        const data = payload.data || {};
+        const summary = payload.summary || {};
+        const processing = summary.processing || {};
+        const processingFailed = Number(processing.failed) > 0;
+        const result = output.querySelector('[data-leave-import-result]');
+        result.textContent = [
+            processingFailed
+                ? 'Data izin tersimpan, tetapi sebagian attendance gagal diproses.'
+                : payload.message || 'Import izin selesai.',
+            `NIP cocok: ${summary.matched ?? 0}`,
+            `NIP tidak ditemukan: ${summary.unmatched ?? 0}`,
+            `NIP duplikat di master: ${summary.ambiguous ?? 0}`,
+            `Attendance dibuat: ${processing.created ?? 0}`,
+            `Attendance diperbarui: ${processing.updated ?? 0}`,
+            `Perlu verifikasi: ${processing.needs_verification ?? 0}`,
+            `Pegawai tidak eligible: ${processing.skipped_ineligible ?? 0}`,
+            `Pemrosesan gagal: ${processing.failed ?? 0}`,
+        ].join(' ');
+        result.hidden = false;
+        result.classList.toggle('border-rose-200', processingFailed);
+        result.classList.toggle('bg-rose-50', processingFailed);
+        result.classList.toggle('text-rose-800', processingFailed);
+        result.classList.toggle('border-emerald-200', !processingFailed);
+        result.classList.toggle('bg-emerald-50', !processingFailed);
+        result.classList.toggle('text-emerald-800', !processingFailed);
+        leaveImportSummary(output.querySelector('[data-leave-import-summary]'), [
+            ['File', data.filename],
+            ['Unit', data.unit?.code || data.unit?.name],
+            ['Total baris', summary.total_rows],
+            ['Tersimpan', summary.imported_rows],
+            ['Data valid gagal', summary.invalid_rows],
+            ['NIP cocok', summary.matched],
+            ['NIP tidak ditemukan', summary.unmatched],
+            ['Attendance dibuat', processing.created],
+            ['Attendance diperbarui', processing.updated],
+            ['Perlu verifikasi', processing.needs_verification],
+            ['Pegawai tidak eligible', processing.skipped_ineligible],
+            ['Pemrosesan gagal', processing.failed],
+        ]);
+        form.dataset.previewReady = 'false';
+        delete form.dataset.previewKey;
+        importButton.hidden = true;
+        showStatus(
+            form,
+            processingFailed
+                ? 'Data izin tersimpan, tetapi sebagian attendance gagal diproses. Periksa riwayat import dan log aplikasi.'
+                : payload.message || 'Import izin berhasil.',
+            processingFailed,
+        );
+    } catch {
+        showStatus(form, 'Tidak dapat memproses file. Periksa koneksi dan coba lagi.', true);
+    } finally {
+        setBusy(form, false);
+    }
+});
+
+const resetLeaveImportPreview = (form) => {
+    form.dataset.previewReady = 'false';
+    delete form.dataset.previewKey;
+    form.querySelector('[data-import-confirm]').hidden = true;
+    form.parentElement.querySelector('[data-leave-import-preview]').hidden = true;
+};
+
+document.addEventListener('input', (event) => {
+    const form = event.target.closest('form[data-leave-import-form]');
+    if (!form) return;
+
+    resetLeaveImportPreview(form);
+});
+
+document.addEventListener('change', (event) => {
+    const form = event.target.closest('form[data-leave-import-form]');
+    if (!form || !['file', 'unit_id'].includes(event.target.name)) return;
+
+    resetLeaveImportPreview(form);
+    showStatus(form, 'File atau unit berubah. Jalankan preview kembali.');
+});
+
+document.addEventListener('reset', (event) => {
+    const form = event.target.closest('form[data-leave-import-form]');
+    if (!form) return;
+
+    resetLeaveImportPreview(form);
+    showStatus(form, '');
 });
 
 const manualLeaveValidationMessages = {

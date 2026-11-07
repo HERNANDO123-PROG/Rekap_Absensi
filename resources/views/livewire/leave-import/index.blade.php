@@ -14,31 +14,87 @@
             <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">Input Excel</p>
                 <h3 class="mt-1 text-lg font-semibold text-slate-900">Unggah data izin</h3>
-                <p class="mt-1 text-sm text-slate-500">Unggah file Excel atau CSV seperti sebelumnya.</p>
+                <p class="mt-1 text-sm text-slate-500">Unggah file Excel atau CSV. NIP digunakan untuk mencocokkan pegawai pada unit yang dipilih.</p>
             </div>
-            <form data-import-form data-preview-endpoint="{{ route('leave-imports.preview') }}" data-import-endpoint="{{ route('leave-imports.store') }}" data-preview-ready="false" class="mt-5 space-y-4">
+            <form data-leave-import-form data-preview-endpoint="{{ route('leave-imports.preview') }}" data-import-endpoint="{{ route('leave-imports.store') }}" data-preview-ready="false" class="mt-5 space-y-4">
                 <div>
                     <label for="leave-unit" class="mb-1 block text-sm font-medium text-slate-700">Unit</label>
                     <select id="leave-unit" name="unit_id" required class="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 text-slate-800 focus:border-cyan-500 focus:outline-none">
-                        @foreach (\App\Models\Unit::query()->orderBy('name')->get() as $unit)
+                        @foreach (\App\Models\Unit::query()->whereIn('code', ['TK', 'SD'])->orderBy('name')->get() as $unit)
                             <option value="{{ $unit->id }}">{{ $unit->code ?? $unit->name }}</option>
                         @endforeach
                     </select>
                 </div>
 
                 <div>
-                    <label for="leave-file" class="mb-1 block text-sm font-medium text-slate-700">File Excel atau CSV</label>
+                    <label for="leave-file" class="mb-1 block text-sm font-medium text-slate-700">File Excel atau CSV (.xls, .xlsx, .csv)</label>
                     <input id="leave-file" name="file" type="file" accept=".xls,.xlsx,.csv" required class="block w-full rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-sm text-slate-600 file:mr-4 file:rounded-lg file:border-0 file:bg-emerald-700 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white" />
                 </div>
 
                 <div class="flex flex-wrap gap-3">
                     <button type="submit" value="preview" class="rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-800">Preview izin</button>
-                    <button type="submit" value="import" data-import-confirm hidden class="rounded-xl bg-cyan-700 px-4 py-2.5 text-sm font-medium text-white hover:bg-cyan-800">Impor data</button>
+                    <button type="submit" value="import" data-import-confirm hidden class="rounded-xl bg-cyan-700 px-4 py-2.5 text-sm font-medium text-white hover:bg-cyan-800">Simpan / Import Data Izin</button>
                     <button type="reset" class="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Reset</button>
                 </div>
                 <p data-form-status role="status" aria-live="polite" class="text-sm text-slate-600"></p>
-                <ul data-import-preview hidden class="space-y-1 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700"></ul>
             </form>
+
+            <section data-leave-import-preview hidden class="mt-5 space-y-4" aria-live="polite">
+                <div data-leave-import-summary class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4"></div>
+                <div class="overflow-x-auto rounded-xl border border-slate-200">
+                    <table class="min-w-full divide-y divide-slate-200 text-left text-sm">
+                        <thead class="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                            <tr>
+                                <th class="px-3 py-2.5">NIP</th>
+                                <th class="px-3 py-2.5">Nama</th>
+                                <th class="px-3 py-2.5">Jabatan</th>
+                                <th class="px-3 py-2.5">Tanggal izin</th>
+                                <th class="px-3 py-2.5">Jenis izin</th>
+                                <th class="px-3 py-2.5">Keterangan</th>
+                                <th class="px-3 py-2.5">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody data-leave-import-preview-rows class="divide-y divide-slate-100 bg-white"></tbody>
+                    </table>
+                </div>
+                <p data-leave-import-result hidden role="status" class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800"></p>
+            </section>
+
+            @php($recentImportBatches = \App\Models\LeaveImportBatch::query()->with('unit')->withCount([
+                'leaveRequests as matched_rows' => fn ($query) => $query->where('matching_status', 'matched'),
+                'leaveRequests as unmatched_rows' => fn ($query) => $query->where('matching_status', 'unmatched'),
+                'leaveRequests as ambiguous_rows' => fn ($query) => $query->where('matching_status', 'ambiguous'),
+            ])->latest('imported_at')->limit(10)->get())
+            @if ($recentImportBatches->isNotEmpty())
+                <section class="mt-6 border-t border-slate-200 pt-5" aria-labelledby="leave-import-history-heading">
+                    <h4 id="leave-import-history-heading" class="text-sm font-semibold text-slate-800">Riwayat import Excel/CSV</h4>
+                    <div class="mt-3 space-y-3">
+                        @foreach ($recentImportBatches as $importBatch)
+                            @php($processing = $importBatch->processing_summary ?? [])
+                            <article class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                <div class="flex flex-wrap items-start justify-between gap-2">
+                                    <div class="min-w-0">
+                                        <p class="break-all text-sm font-medium text-slate-800">{{ $importBatch->filename }}</p>
+                                        <p class="mt-1 text-xs text-slate-500">
+                                            {{ $importBatch->unit?->code ?? $importBatch->unit?->name ?? 'Unit tidak tersedia' }}
+                                            · {{ $importBatch->period_start?->format('Y-m-d') ?? '—' }} s.d. {{ $importBatch->period_end?->format('Y-m-d') ?? '—' }}
+                                            · {{ $importBatch->imported_at?->format('Y-m-d H:i') ?? 'Belum diproses' }}
+                                        </p>
+                                    </div>
+                                    <span class="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">{{ $importBatch->status->value }}</span>
+                                </div>
+                                <p class="mt-2 text-xs leading-5 text-slate-600">
+                                    Baris {{ $importBatch->total_rows }} · tersimpan {{ $importBatch->success_rows }} · gagal {{ $importBatch->error_rows }}
+                                    · NIP cocok {{ $importBatch->matched_rows }} · tidak ditemukan {{ $importBatch->unmatched_rows }} · duplikat master {{ $importBatch->ambiguous_rows }}
+                                    · attendance dibuat {{ $processing['created'] ?? 0 }} · diperbarui {{ $processing['updated'] ?? 0 }}
+                                    · perlu verifikasi {{ $processing['needs_verification'] ?? 0 }} · pegawai tidak eligible {{ $processing['skipped_ineligible'] ?? 0 }}
+                                    · pemrosesan gagal {{ $processing['failed'] ?? 0 }}
+                                </p>
+                            </article>
+                        @endforeach
+                    </div>
+                </section>
+            @endif
         </div>
 
         <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="manual-leave-heading">

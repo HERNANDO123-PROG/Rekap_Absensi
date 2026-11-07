@@ -2,24 +2,44 @@
 
 namespace App\Services\Exports;
 
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
+use RuntimeException;
+use Throwable;
 
 class ExcelExportHelper
 {
     public static function writeHeaderRow(Worksheet $sheet, array $headers, int $row, string $startColumn = 'A'): void
     {
-        $column = 1;
+        $column = Coordinate::columnIndexFromString($startColumn);
 
         foreach ($headers as $header) {
-            $cell = $startColumn.chr(64 + $column).$row;
-            if ($column > 26) {
-                $cell = self::columnName($column).$row;
-            }
-
-            $sheet->setCellValue($cell, $header);
+            $cell = self::columnName($column++).$row;
+            self::writeValue($sheet, $cell, $header);
             $sheet->getStyle($cell)->getFont()->setBold(true);
-            $column++;
+        }
+    }
+
+    public static function writeValue(Worksheet $sheet, string $coordinate, mixed $value): void
+    {
+        if (is_string($value)) {
+            $sheet->setCellValueExplicit($coordinate, $value, DataType::TYPE_STRING);
+
+            return;
+        }
+
+        $sheet->setCellValue($coordinate, $value);
+    }
+
+    public static function writeRow(Worksheet $sheet, int $row, array $values, string $startColumn = 'A'): void
+    {
+        $column = Coordinate::columnIndexFromString($startColumn);
+
+        foreach (array_values($values) as $value) {
+            self::writeValue($sheet, self::columnName($column++).$row, $value);
         }
     }
 
@@ -40,8 +60,8 @@ class ExcelExportHelper
     {
         $row = 1;
         foreach ($meta as $label => $value) {
-            $sheet->setCellValue('A'.$row, $label);
-            $sheet->setCellValue('B'.$row, $value);
+            self::writeValue($sheet, 'A'.$row, (string) $label);
+            self::writeValue($sheet, 'B'.$row, $value);
             $row++;
         }
     }
@@ -60,13 +80,28 @@ class ExcelExportHelper
         return (int) ($matches[1] ?? 1);
     }
 
-    public static function downloadPath(Spreadsheet $spreadsheet, string $filename): string
+    public static function downloadPath(Spreadsheet $spreadsheet): string
     {
         $path = tempnam(sys_get_temp_dir(), 'export-');
-        $writer = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($spreadsheet, 'Xlsx');
-        $writer->save($path);
-        $spreadsheet->disconnectWorksheets();
 
-        return $path;
+        if ($path === false) {
+            $spreadsheet->disconnectWorksheets();
+
+            throw new RuntimeException('Unable to create a temporary export file.');
+        }
+
+        try {
+            IOFactory::createWriter($spreadsheet, 'Xlsx')->save($path);
+
+            return $path;
+        } catch (Throwable $exception) {
+            if (is_file($path) && ! unlink($path)) {
+                throw new RuntimeException('Export failed and its temporary file could not be removed.', 0, $exception);
+            }
+
+            throw $exception;
+        } finally {
+            $spreadsheet->disconnectWorksheets();
+        }
     }
 }

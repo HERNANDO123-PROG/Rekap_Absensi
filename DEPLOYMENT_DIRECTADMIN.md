@@ -81,7 +81,16 @@ php artisan db:seed --class=UnitSeeder --force
 
 The unit seeder is idempotent and creates TK/SD when absent. Never run `migrate:fresh` on production: it drops all tables and data. Take a verified database backup before deployment migrations.
 
-## 6. Writable Directories
+## 6. HRD Account Setup and Recovery
+
+Public registration is disabled. A single HRD account is selected and stored in the `hrd_account_settings` table; no `HRD_USER_ID` environment variable is required.
+
+- Apply the additive migration with `php artisan migrate --force` before the first setup.
+- Run `php artisan hrd:setup` from the project root. On a new database, the command prompts for a username and hidden password, then creates the first account. If user records already exist, it lists their IDs and usernames and prompts you to select the intended account. It updates that account's password and records it as the only account allowed to authenticate. Other user records are retained.
+- To change the HRD password later, run `php artisan hrd:setup` again. The selected account is read from the database and only its password is updated.
+- Passwords are prompted interactively, hashed by Laravel, and never passed as command arguments or printed. For a lost password, use the same private server-side command after verifying the selected account. There is no public or email-based password reset.
+
+## 7. Writable Directories
 
 The PHP/web-server account must be able to write to:
 
@@ -90,7 +99,7 @@ The PHP/web-server account must be able to write to:
 
 Use the narrowest owner/group permissions supported by the hosting account (commonly owner-writable directories, not world-writable permissions). The import services read uploaded temporary files and do not publish them as public assets. No `storage:link` is required by the current application.
 
-## 7. Cache and Deployment Commands
+## 8. Cache and Deployment Commands
 
 After `.env`, dependencies, assets, and database are ready:
 
@@ -111,7 +120,7 @@ php artisan view:cache
 
 There is no required queue worker: `.env.example` selects synchronous queue processing. Do not enable database/Redis queue drivers unless the deployment process is intentionally changed and operated accordingly.
 
-## 8. Apache and DirectAdmin Checklist
+## 9. Apache and DirectAdmin Checklist
 
 - Domain document root points to `public/`, not the project root.
 - HTTPS is enabled and `APP_URL` uses the HTTPS origin.
@@ -119,12 +128,13 @@ There is no required queue worker: `.env.example` selects synchronous queue proc
 - `public/build/manifest.json` exists and the generated files are accessible.
 - `storage/` and `bootstrap/cache/` are writable by the PHP account.
 - `.env` is outside public access; `APP_DEBUG=false` and a unique `APP_KEY` is configured.
+- The `hrd_account_settings` table identifies the single operational account, and public registration is unavailable.
 - Database credentials use a dedicated, least-privilege account.
 - Production database backups are taken before schema changes.
 - Registration is reviewed/disabled if open account registration is not part of the deployment policy.
 - No test database, sample attendance rows, or development files are deployed.
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 - **500 / blank page:** inspect Laravel logs in `storage/logs/laravel.log`; do not enable debug output on a public production site. Confirm writable directories and `APP_KEY`.
 - **CSS/JS missing:** rebuild `public/build` and upload the complete directory; confirm `APP_URL` and the domain document root.

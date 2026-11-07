@@ -34,6 +34,7 @@ class WorkCalendarService
     {
         return DB::transaction(function () use ($attributes, $userId): WorkCalendar {
             $data = $this->validateEntry($attributes);
+            $data['national_calendar_event_id'] = null;
 
             if (WorkCalendar::query()->where('unit_id', $data['unit_id'])->whereDate('date', $data['date'])->exists()) {
                 throw ValidationException::withMessages(['date' => 'A calendar entry already exists for this unit and date.']);
@@ -63,6 +64,7 @@ class WorkCalendarService
             }
 
             $data = $this->validateEntry($attributes);
+            $data['national_calendar_event_id'] = null;
 
             if (WorkCalendar::query()
                 ->where('unit_id', $data['unit_id'])
@@ -110,7 +112,7 @@ class WorkCalendarService
                 ->first();
             $calendar = WorkCalendar::query()->updateOrCreate(
                 ['unit_id' => $data['unit_id'], 'date' => $data['date']],
-                collect($data)->except(['unit_id', 'date'])->all(),
+                [...collect($data)->except(['unit_id', 'date'])->all(), 'national_calendar_event_id' => null],
             );
             $this->audit(
                 $userId,
@@ -158,6 +160,7 @@ class WorkCalendarService
             $rows[] = [
                 'unit_id' => $unit->id,
                 'date' => $dateValue,
+                'national_calendar_event_id' => null,
                 'type' => $entry['type'],
                 'title' => $entry['title'],
                 'description' => $entry['description'],
@@ -180,7 +183,7 @@ class WorkCalendarService
             WorkCalendar::query()->upsert(
                 $rows,
                 ['unit_id', 'date'],
-                ['type', 'title', 'description', 'is_working_day', 'start_time', 'end_time', 'updated_at'],
+                ['type', 'title', 'description', 'is_working_day', 'start_time', 'end_time', 'national_calendar_event_id', 'updated_at'],
             );
 
             $created = count(array_diff($dates, $existingDates));

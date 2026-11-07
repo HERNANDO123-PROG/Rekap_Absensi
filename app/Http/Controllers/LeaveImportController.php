@@ -41,7 +41,21 @@ class LeaveImportController extends Controller
                 $request->user()?->id,
             );
 
-            return response()->json(['data' => $batch->load('unit')], 201);
+            $summary = [
+                'total_rows' => $batch->total_rows,
+                'imported_rows' => $batch->success_rows,
+                'invalid_rows' => $batch->error_rows,
+                'matched' => $batch->leaveRequests()->where('matching_status', 'matched')->count(),
+                'unmatched' => $batch->leaveRequests()->where('matching_status', 'unmatched')->count(),
+                'ambiguous' => $batch->leaveRequests()->where('matching_status', 'ambiguous')->count(),
+                'processing' => $batch->processing_summary ?? [],
+            ];
+
+            return response()->json([
+                'data' => $batch->load('unit'),
+                'summary' => $summary,
+                'message' => 'Import izin selesai. '.$summary['imported_rows'].' baris tersimpan, '.$summary['invalid_rows'].' baris tidak valid.',
+            ], 201);
         } catch (LeaveDuplicateImportException $exception) {
             return response()->json(['message' => $exception->getMessage()], 409);
         } catch (LeaveImportException $exception) {

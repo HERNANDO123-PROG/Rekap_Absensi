@@ -491,39 +491,53 @@ class AttendanceFingerprintPeriodCalculationTest extends TestCase
         $this->assertNull($unverifiedDay['metrics']['izin_keluar']);
     }
 
-    public function test_imported_leave_keeps_its_existing_unverifiable_report_behavior(): void
+    public function test_completed_matched_imported_duty_and_exit_are_used_in_the_report(): void
     {
         $unit = $this->unit();
-        $employee = $this->employee($unit, 'Imported leave');
+        $dutyEmployee = $this->employee($unit, 'Imported duty');
+        $exitEmployee = $this->employee($unit, 'Imported exit');
         $this->calendar($unit, '2026-09-01', true, '07:00', '15:00');
         $batch = LeaveImportBatch::query()->create([
             'unit_id' => $unit->id,
             'filename' => 'leave.xlsx',
             'file_hash' => hash('sha256', 'leave-import'),
             'status' => ImportBatchStatus::Completed,
-            'total_rows' => 1,
-            'success_rows' => 1,
+            'total_rows' => 2,
+            'success_rows' => 2,
         ]);
-        $leave = LeaveRequest::query()->create([
-            'import_batch_id' => $batch->id,
-            'source' => 'import',
-            'unit_id' => $unit->id,
-            'employee_id' => $employee->id,
-            'raw_name' => $employee->nama_lengkap,
-            'normalized_name' => strtolower($employee->nama_lengkap),
-            'request_date' => '2026-09-01',
-            'leave_type' => LeaveType::Absent,
-            'raw_leave_type' => LeaveType::Absent->value,
-            'matching_status' => MatchingStatus::Matched,
-            'approval_status' => LeaveApprovalStatus::Confirmed,
-        ]);
-        $this->attendance($unit, $employee, $leave, '2026-09-01', AttendanceStatus::Absent);
+        foreach ([
+            [$dutyEmployee, LeaveType::OfficialDuty],
+            [$exitEmployee, LeaveType::TemporaryExit],
+        ] as [$employee, $leaveType]) {
+            LeaveRequest::query()->create([
+                'import_batch_id' => $batch->id,
+                'source' => 'import',
+                'unit_id' => $unit->id,
+                'employee_id' => $employee->id,
+                'raw_name' => $employee->nama_lengkap,
+                'normalized_name' => strtolower($employee->nama_lengkap),
+                'request_date' => '2026-09-01',
+                'leave_type' => $leaveType,
+                'raw_leave_type' => $leaveType->value,
+                'matching_status' => MatchingStatus::Matched,
+            ]);
+        }
 
-        $day = $this->report($unit)['data'][0]['daily'][0];
+        $rows = collect($this->report($unit)['data'])->keyBy('employee_id');
+        $dutyDay = $rows->get($dutyEmployee->id)['daily'][0];
+        $exitDay = $rows->get($exitEmployee->id)['daily'][0];
 
-        $this->assertSame('import', $day['leave_approval_status']);
-        $this->assertSame('unverifiable', $day['leave_status']);
-        $this->assertTrue($day['is_ambiguous']);
+        $this->assertSame('import', $dutyDay['leave_approval_status']);
+        $this->assertSame('verified', $dutyDay['leave_status']);
+        $this->assertSame(1, $dutyDay['metrics']['dinas']);
+        $this->assertSame(0, $dutyDay['metrics']['tidak_hadir']);
+        $this->assertFalse($dutyDay['is_ambiguous']);
+
+        $this->assertSame('import', $exitDay['leave_approval_status']);
+        $this->assertSame('verified', $exitDay['leave_status']);
+        $this->assertSame(1, $exitDay['metrics']['izin_keluar']);
+        $this->assertSame(0, $exitDay['metrics']['tidak_hadir']);
+        $this->assertFalse($exitDay['is_ambiguous']);
     }
 
     public function test_unmatched_or_incomplete_batch_logs_are_not_used_for_inference(): void

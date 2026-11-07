@@ -12,6 +12,8 @@ use App\Models\EmployeeAlias;
 use App\Models\LeaveRequest;
 use App\Models\Unit;
 use App\Models\User;
+use App\Services\Reports\AttendancePeriodReportService;
+use App\Services\Reports\AttendanceAnnualReportService;
 use App\Services\Leave\LeaveDateParser;
 use App\Services\Leave\LeaveDuplicateImportException;
 use App\Services\Leave\LeaveFormFileReader;
@@ -20,10 +22,12 @@ use App\Services\Leave\LeaveImportException;
 use App\Services\Leave\LeaveImportService;
 use App\Services\Leave\LeaveReasonClassifier;
 use App\Services\Leave\LeaveTimeParser;
+use App\Services\HrdAccountService;
 use App\Services\NameNormalizer;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
@@ -40,10 +44,17 @@ class LeaveImportTest extends TestCase
 
     private array $temporaryFiles = [];
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->withoutMiddleware(ValidateCsrfToken::class);
+    }
+
     public function test_header_mapper_uses_names_normalizes_whitespace_and_ignores_additional_headers(): void
     {
         $headers = [
             'Timestamp',
+            'NIP',
             " Keterangan Izin\n (Jelaskan)* ",
             'Nama   Lengkap dan Gelar *',
             "Dokumentasi\r\n(Khusus Perjalanan Dinas)",
@@ -58,8 +69,9 @@ class LeaveImportTest extends TestCase
 
         $this->assertSame([], $mapping['missing_fields']);
         $this->assertSame([], $mapping['ambiguous_fields']);
-        $this->assertSame(2, $mapping['mapping']['raw_name']);
-        $this->assertSame(6, $mapping['mapping']['request_date']);
+        $this->assertSame(3, $mapping['mapping']['raw_name']);
+        $this->assertSame(1, $mapping['mapping']['nip']);
+        $this->assertSame(7, $mapping['mapping']['request_date']);
         $this->assertSame('Timestamp', $mapping['additional_headers'][0]['header']);
         $this->assertSame('Catatan Tambahan', $mapping['additional_headers'][1]['header']);
         $this->assertArrayNotHasKey('timestamp', $mapping['mapping']);
@@ -73,7 +85,7 @@ class LeaveImportTest extends TestCase
     public function test_missing_and_ambiguous_required_headers_are_reported(): void
     {
         $mapper = app(LeaveFormHeaderMapper::class);
-        $headers = ['Nama Lengkap dan Gelar', 'Jabatan', 'Tanggal Pengajuan Izin'];
+        $headers = ['NIP', 'Nama Lengkap dan Gelar', 'Jabatan', 'Tanggal Pengajuan Izin'];
 
         $this->assertContains('request_time', $mapper->map($headers)['missing_fields']);
 
@@ -96,7 +108,7 @@ class LeaveImportTest extends TestCase
 
             $this->assertSame('Timestamp', $data['headers'][0]);
             $this->assertSame([], $data['header_mapping']['missing_fields']);
-            $this->assertSame(2, $data['header_mapping']['mapping']['raw_name']);
+            $this->assertSame(3, $data['header_mapping']['mapping']['raw_name']);
             $this->assertCount(1, $data['rows']);
         }
     }
@@ -139,7 +151,7 @@ class LeaveImportTest extends TestCase
         $otherUnit = $this->createUnit('SD');
         $this->createEmployee($otherUnit, 'Siti Aisyah, S.Pd.');
         $file = $this->createFixture('xlsx', $this->fixtureRows());
-        $this->actingAs(User::factory()->create());
+        $this->actingAsHrdUser();
 
         $response = $this->postJson('/leave-imports/preview', [
             'unit_id' => $unit->id,
@@ -165,6 +177,10 @@ class LeaveImportTest extends TestCase
             ->assertJsonPath('data.absence_reason_distribution.sakit', 1)
             ->assertJsonPath('data.absence_reason_distribution.izin', 1)
             ->assertJsonPath('data.absence_reason_distribution.tidak_diketahui', 1);
+        $response->assertJsonPath('data.preview_rows.0.nip', '000123')
+            ->assertJsonPath('data.preview_rows.0.status', 'matched')
+            ->assertJsonPath('data.preview_rows.7.status', 'unmatched')
+            ->assertJsonPath('data.preview_rows.8.status', 'ambiguous');
 
         $ignoredHeaders = array_column($response->json('data.ignored_additional_columns'), 'header');
         $this->assertContains('Timestamp', $ignoredHeaders);
@@ -205,6 +221,7 @@ class LeaveImportTest extends TestCase
 
         $this->assertSame(' Siti Aisyah, S.Pd. ', $late->raw_name);
         $this->assertSame('siti aisyah', $late->normalized_name);
+        $this->assertSame('000123', $late->nip);
         $this->assertSame($employees['official']->id, $late->employee_id);
         $this->assertSame(MatchingStatus::Matched, $late->matching_status);
         $this->assertSame(LeaveType::Late, $late->leave_type);
@@ -229,6 +246,7 @@ class LeaveImportTest extends TestCase
         $this->assertSame('00:00:00', $temporaryExit->request_time);
 
         $this->assertNull($unmatched->employee_id);
+        $this->assertSame('000404', $unmatched->nip);
         $this->assertSame(MatchingStatus::Unmatched, $unmatched->matching_status);
         $this->assertNull($inactive->employee_id);
         $this->assertSame(MatchingStatus::Unmatched, $inactive->matching_status);
@@ -238,7 +256,9 @@ class LeaveImportTest extends TestCase
         $this->assertSame(2, count($batch->error_details));
         $this->assertSame('Keperluan Baru', $batch->error_details[0]['raw_leave_type']);
         $this->assertSame('46245', $batch->error_details[0]['raw_date']);
-        $this->assertDatabaseCount('attendance_records', 0);
+        $this->assertSame(7, $batch->processing_summary['created']);
+        $this->assertSame(2, $batch->processing_summary['needs_verification']);
+        $this->assertDatabaseCount('attendance_records', 7);
         $this->assertSame(4, Employee::query()->count());
     }
 
@@ -268,7 +288,7 @@ class LeaveImportTest extends TestCase
     {
         $unit = $this->createUnit('TK');
         $file = $this->createFixture('xlsx', [$this->validRow()], includeRequiredDescription: false);
-        $this->actingAs(User::factory()->create());
+        $this->actingAsHrdUser();
 
         $response = $this->postJson('/leave-imports/preview', [
             'unit_id' => $unit->id,
@@ -285,6 +305,144 @@ class LeaveImportTest extends TestCase
 
         $this->assertDatabaseCount('leave_import_batches', 0);
         $this->assertDatabaseCount('leave_requests', 0);
+    }
+
+    public function test_missing_nip_header_returns_a_clear_legacy_file_error(): void
+    {
+        $unit = $this->createUnit('TK');
+        $file = $this->createFixture('csv', [$this->validRow()], includeNip: false);
+
+        $this->actingAsHrdUser()
+            ->postJson('/leave-imports/preview', [
+                'unit_id' => $unit->id,
+                'file' => $this->uploadedFile($file),
+            ])
+            ->assertUnprocessable()
+            ->assertJsonPath('message', 'Kolom NIP wajib tersedia. File lama tanpa NIP tidak dapat digunakan untuk pencocokan izin.')
+            ->assertJsonPath('details.missing_fields.0', 'nip');
+
+        $this->assertDatabaseCount('leave_requests', 0);
+    }
+
+    public function test_csv_fixture_previews_and_imports_by_string_nip_with_unit_scoping_and_duplicate_protection(): void
+    {
+        $tk = $this->createUnit('TK');
+        $sd = $this->createUnit('SD');
+        $tkEmployee = $this->createEmployee($tk, 'Nama Master TK');
+        $tkEmployee->update(['nip' => '000123456']);
+        $sdEmployee = $this->createEmployee($sd, 'Nama Master SD');
+        $sdEmployee->update(['nip' => '000123456']);
+        $filePath = base_path('tests/Fixtures/dummy_izin_september_2025.csv');
+        $file = $this->uploadedFile($filePath, 'dummy_izin_september_2025.csv');
+        $this->actingAsHrdUser();
+
+        $response = $this->postJson('/leave-imports/preview', ['unit_id' => $tk->id, 'file' => $file]);
+        $response->assertOk()
+            ->assertJsonPath('data.filename', 'dummy_izin_september_2025.csv')
+            ->assertJsonPath('data.unit.code', 'TK')
+            ->assertJsonPath('data.total_rows', 2)
+            ->assertJsonPath('data.matched', 1)
+            ->assertJsonPath('data.unmatched', 1)
+            ->assertJsonPath('data.valid_rows', 2)
+            ->assertJsonPath('data.invalid_rows', 0)
+            ->assertJsonPath('data.preview_rows.0.nip', '000123456')
+            ->assertJsonPath('data.preview_rows.0.status', 'matched')
+            ->assertJsonPath('data.preview_rows.1.status', 'unmatched');
+
+        $this->assertDatabaseCount('leave_import_batches', 0);
+        $this->assertDatabaseCount('leave_requests', 0);
+
+        $this->postJson('/leave-imports', ['unit_id' => $tk->id, 'file' => $this->uploadedFile($filePath, 'dummy_izin_september_2025.csv')])
+            ->assertCreated()
+            ->assertJsonPath('summary.total_rows', 2)
+            ->assertJsonPath('summary.imported_rows', 2)
+            ->assertJsonPath('summary.matched', 1)
+            ->assertJsonPath('summary.unmatched', 1)
+            ->assertJsonPath('summary.processing.created', 1);
+
+        $requests = LeaveRequest::query()->orderBy('id')->get();
+        $this->assertSame('000123456', $requests[0]->nip);
+        $this->assertSame($tkEmployee->id, $requests[0]->employee_id);
+        $this->assertSame($tk->id, $requests[0]->unit_id);
+        $this->assertNull($requests[1]->employee_id);
+        $this->assertSame(MatchingStatus::Unmatched, $requests[1]->matching_status);
+        $this->assertSame('009999999', $requests[1]->nip);
+
+        $this->postJson('/leave-imports', ['unit_id' => $tk->id, 'file' => $this->uploadedFile($filePath, 'dummy_izin_september_2025.csv')])
+            ->assertStatus(409);
+
+        $this->postJson('/leave-imports', ['unit_id' => $sd->id, 'file' => $this->uploadedFile($filePath, 'dummy_izin_september_2025.csv')])
+            ->assertCreated();
+
+        $this->assertDatabaseCount('leave_requests', 4);
+        $this->assertSame($sdEmployee->id, LeaveRequest::query()->where('unit_id', $sd->id)->firstOrFail()->employee_id);
+    }
+
+    public function test_excel_import_processes_attendance_and_updates_the_period_report(): void
+    {
+        $unit = $this->createUnit('TK');
+        $employee = $this->createEmployee($unit, 'Master Dinas');
+        $employee->update(['nip' => '000123']);
+        $file = $this->createFixture('xlsx', [
+            $this->validRow('Nama pendukung', 'Perjalanan Dinas/Tugas Resmi', 'Kegiatan resmi.', '00.00', '', '2026-08-03'),
+            $this->validRow('Nama pendukung', 'Tidak Hadir', 'Demam tinggi.', '00.00', '', '2026-08-04'),
+            $this->validRow('Nama pendukung', 'Tidak Hadir', 'Urusan keluarga.', '00.00', '', '2026-08-05'),
+        ]);
+        $this->actingAsHrdUser();
+        $this->get(route('leave-import.index'))
+            ->assertOk()
+            ->assertSee('Simpan / Import Data Izin')
+            ->assertSee('data-import-confirm', false);
+
+        $this->postJson('/leave-imports/preview', [
+            'unit_id' => $unit->id,
+            'file' => $this->uploadedFile($file),
+        ])->assertOk()
+            ->assertJsonPath('data.valid_rows', 3)
+            ->assertJsonPath('data.matched', 3);
+        $this->assertDatabaseCount('leave_requests', 0);
+        $this->assertDatabaseCount('attendance_records', 0);
+
+        $response = $this->postJson('/leave-imports', [
+            'unit_id' => $unit->id,
+            'file' => $this->uploadedFile($file),
+        ])->assertCreated()
+            ->assertJsonPath('summary.imported_rows', 3)
+            ->assertJsonPath('summary.processing.created', 3)
+            ->assertJsonPath('summary.processing.updated', 0)
+            ->assertJsonPath('summary.processing.failed', 0);
+
+        $this->assertDatabaseCount('leave_requests', 3);
+        $this->assertDatabaseCount('attendance_records', 3);
+        $this->assertSame(1, $employee->attendanceRecords()->where('status', 'dinas')->count());
+        $this->assertSame(1, $employee->attendanceRecords()->where('status', 'sakit')->count());
+        $this->assertSame(1, $employee->attendanceRecords()->where('status', 'izin')->count());
+        $report = app(AttendancePeriodReportService::class)
+            ->generate($unit->id, '2026-08-03', '2026-08-05')['data'][0];
+        $this->assertSame(1, $report['dinas']);
+        $this->assertSame(1, $report['sakit']);
+        $this->assertSame(1, $report['izin']);
+        $this->assertSame(0, $report['alpha']);
+        $this->assertSame(0, $report['perlu_verifikasi']);
+        $annual = app(AttendanceAnnualReportService::class)
+            ->generate($unit->id, 2026)['data'][0]['monthly']['August'];
+        $this->assertSame($report['dinas'], $annual['dinas']);
+        $this->assertSame($report['sakit'], $annual['sakit']);
+        $this->assertSame($report['izin'], $annual['izin']);
+        $this->get(route('leave-import.index'))
+            ->assertOk()
+            ->assertSee('Riwayat import Excel/CSV')
+            ->assertSee('Form Responses.xlsx');
+
+        $this->postJson('/leave-imports', [
+            'unit_id' => $unit->id,
+            'file' => $this->uploadedFile($file),
+        ])->assertStatus(409);
+        $this->assertDatabaseCount('leave_requests', 3);
+        $this->assertDatabaseCount('attendance_records', 3);
+
+        $batch = \App\Models\LeaveImportBatch::query()->findOrFail($response->json('data.id'));
+        $this->assertSame(3, $batch->processing_summary['created']);
     }
 
     public function test_fatal_request_insert_rolls_back_all_requests_and_batch_is_failed(): void
@@ -320,7 +478,7 @@ class LeaveImportTest extends TestCase
         $this->postJson('/leave-imports')->assertUnauthorized();
 
         $file = $this->createFixture('xlsx', [$this->validRow()]);
-        $this->actingAs(User::factory()->create());
+        $this->actingAsHrdUser();
         $this->postJson('/leave-imports', [
             'unit_id' => $unit->id,
             'file' => $this->uploadedFile($file),
@@ -329,6 +487,14 @@ class LeaveImportTest extends TestCase
             ->assertJsonPath('data.status', ImportBatchStatus::Completed->value)
             ->assertJsonPath('data.success_rows', 1)
             ->assertJsonPath('data.unit.code', 'TK');
+    }
+
+    private function actingAsHrdUser(): static
+    {
+        $user = User::factory()->create();
+        app(HrdAccountService::class)->setUser($user);
+
+        return $this->actingAs($user);
     }
 
     private function fixtureRows(): array
@@ -341,9 +507,9 @@ class LeaveImportTest extends TestCase
             $this->validRow('Siti Alias', 'Pulang Lebih Awal', 'Ada keperluan.', '13:30:00', '', '2026-08-05'),
             $this->validRow('Siti Aisyah, S.Pd.', 'Perjalanan Dinas/Tugas Resmi', 'Kegiatan resmi.', '00.00', 'https://drive.google.com/file/d/example/view', '2026-08-31'),
             $this->validRow('Siti Aisyah, S.Pd.', 'Keluar', 'Keperluan singkat.', '00.00', '', '2026-08-07'),
-            $this->validRow('Nama Tidak Terdaftar', 'Terlambat', 'Kendala perjalanan.', '07:30', '', '2026-08-08'),
-            $this->validRow('Nama Ganda', 'Pulang Lebih Awal', 'Urusan keluarga.', '14:00', '', '2026-08-09'),
-            $this->validRow('Pegawai Nonaktif', 'Terlambat', 'Ada urusan.', '07:15', '', '2026-08-10'),
+            $this->validRow('Nama Tidak Terdaftar', 'Terlambat', 'Kendala perjalanan.', '07:30', '', '2026-08-08', '000404'),
+            $this->validRow('Nama Ganda', 'Pulang Lebih Awal', 'Urusan keluarga.', '14:00', '', '2026-08-09', '000222'),
+            $this->validRow('Pegawai Nonaktif', 'Terlambat', 'Ada urusan.', '07:15', '', '2026-08-10', '000999'),
             $this->validRow('Siti Aisyah, S.Pd.', 'Keperluan Baru', 'Keterangan.', '09:00', '', '2026-08-11'),
             $this->validRow('Siti Aisyah, S.Pd.', 'Keluar', 'Keterangan.', '10:00', '', 'not-a-date'),
         ];
@@ -356,9 +522,11 @@ class LeaveImportTest extends TestCase
         string $time = '10.10',
         string $attachment = '',
         string $date = '2026-08-01',
+        string $nip = '000123',
     ): array {
         return [
             'Timestamp' => '2026-08-01 06:00:00',
+            'nip' => $nip,
             'description' => $description,
             'raw_name' => $name,
             'attachment' => $attachment,
@@ -374,9 +542,11 @@ class LeaveImportTest extends TestCase
         string $extension,
         array $rows,
         bool $includeRequiredDescription = true,
+        bool $includeNip = true,
     ): string {
         $headers = [
             'Timestamp',
+            'NIP',
             "Keterangan Izin\n(Jelaskan)*",
             'Nama Lengkap dan Gelar*',
             "Dokumentasi\n(Khusus Perjalanan Dinas)",
@@ -389,6 +559,10 @@ class LeaveImportTest extends TestCase
 
         if (! $includeRequiredDescription) {
             $headers = array_values(array_filter($headers, static fn (string $header): bool => ! str_contains($header, 'Keterangan Izin')));
+        }
+
+        if (! $includeNip) {
+            $headers = array_values(array_filter($headers, static fn (string $header): bool => $header !== 'NIP'));
         }
 
         if ($extension === 'csv') {
@@ -428,6 +602,12 @@ class LeaveImportTest extends TestCase
                 $sheet->setCellValueExplicit($column.$rowNumber, $row['request_time'], DataType::TYPE_STRING);
             }
 
+            $nipColumn = array_search('NIP', $headers, true);
+            if ($nipColumn !== false && isset($row['nip'])) {
+                $column = Coordinate::stringFromColumnIndex($nipColumn + 1);
+                $sheet->setCellValueExplicit($column.$rowNumber, (string) $row['nip'], DataType::TYPE_STRING);
+            }
+
             $dateColumn = array_search('Tanggal Pengajuan Izin*', $headers, true);
             if ($dateColumn !== false && isset($row['request_date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $row['request_date']) === 1) {
                 $column = Coordinate::stringFromColumnIndex($dateColumn + 1);
@@ -449,6 +629,7 @@ class LeaveImportTest extends TestCase
     private function rowValues(array $headers, array $row): array
     {
         $internalValues = [
+            'NIP' => $row['nip'] ?? '',
             'Nama Lengkap dan Gelar*' => $row['raw_name'],
             'Jabatan*' => $row['position'] ?? 'Guru',
             'Tanggal Pengajuan Izin*' => $row['request_date'],
@@ -489,15 +670,19 @@ class LeaveImportTest extends TestCase
     {
         $normalizer = app(NameNormalizer::class);
         $official = $this->createEmployee($unit, 'Siti Aisyah, S.Pd.');
+        $official->update(['nip' => '000123']);
         EmployeeAlias::create([
             'employee_id' => $official->id,
             'alias_name' => 'Siti Alias',
             'normalized_alias' => $normalizer->normalize('Siti Alias'),
         ]);
 
-        $this->createEmployee($unit, 'Nama Ganda');
-        $this->createEmployee($unit, 'Nama Ganda');
+        $duplicateOne = $this->createEmployee($unit, 'Nama Ganda');
+        $duplicateOne->update(['nip' => '000222']);
+        $duplicateTwo = $this->createEmployee($unit, 'Nama Ganda');
+        $duplicateTwo->update(['nip' => '000222']);
         $inactive = $this->createEmployee($unit, 'Pegawai Nonaktif', EmployeeStatus::Inactive);
+        $inactive->update(['nip' => '000999']);
 
         return ['official' => $official, 'inactive' => $inactive];
     }

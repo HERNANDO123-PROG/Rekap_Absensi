@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class NationalCalendarEvent extends Model
 {
@@ -32,5 +33,10 @@ class NationalCalendarEvent extends Model
             'last_synced_at' => 'datetime',
             'verified_at' => 'datetime',
         ];
+    }
+
+    public function workCalendarEntries(): HasMany
+    {
+        return $this->hasMany(WorkCalendar::class);
     }
 }

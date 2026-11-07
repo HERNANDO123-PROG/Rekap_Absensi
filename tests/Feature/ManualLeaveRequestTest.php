@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\EmployeeStatus;
+use App\Enums\AbsenceReason;
 use App\Enums\ImportBatchStatus;
 use App\Enums\LeaveApprovalStatus;
 use App\Enums\LeaveType;
@@ -16,10 +17,13 @@ use App\Models\LeaveImportBatch;
 use App\Models\LeaveRequest;
 use App\Models\Unit;
 use App\Models\User;
+use App\Models\WorkCalendar;
 use App\Models\WorkScheduleCategory;
 use App\Services\Attendance\AttendanceProcessingService;
+use App\Services\HrdAccountService;
 use App\Services\Reports\AttendancePeriodReportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Tests\TestCase;
 
 class ManualLeaveRequestTest extends TestCase
@@ -67,7 +71,10 @@ class ManualLeaveRequestTest extends TestCase
             $this->assertNull($saved->confirmed_by);
             $this->assertNull($saved->confirmed_at);
             $this->assertNull($saved->request_time);
-            $this->assertNull($saved->absence_reason);
+            $this->assertSame(
+                $expectedType === LeaveType::Absent ? AbsenceReason::Permission : null,
+                $saved->absence_reason,
+            );
         }
 
         $this->get(route('leave-import.index'))
@@ -266,13 +273,13 @@ class ManualLeaveRequestTest extends TestCase
             ->assertDontSee('data-manual-leave-confirm');
         $record->refresh();
         $this->assertSame($attendanceRecordId, $record->id);
-        $this->assertSame('alpha', $record->status->value);
+        $this->assertSame('izin', $record->status->value);
         $this->assertFalse($record->needs_verification);
         $this->assertSame($leaveId, $record->leave_request_id);
         $this->assertSame(20, $record->late_minutes);
         $this->assertDatabaseCount('attendance_records', 1);
         $report = app(AttendancePeriodReportService::class)->generate($unit->id, '2026-11-02', '2026-11-02');
-        $this->assertSame(1, $report['data'][0]['alpha']);
+        $this->assertSame(1, $report['data'][0]['izin']);
         $this->assertSame(0, $report['data'][0]['terlambat']);
 
         $processedAt = $record->processed_at->toDateTimeString();
@@ -300,6 +307,59 @@ class ManualLeaveRequestTest extends TestCase
         $report = app(AttendancePeriodReportService::class)->generate($unit->id, '2026-11-02', '2026-11-02');
         $this->assertSame(0, $report['data'][0]['alpha']);
         $this->assertSame(1, $report['data'][0]['terlambat']);
+    }
+
+    public function test_confirmed_manual_exit_keeps_approval_and_recap_when_interval_is_incomplete(): void
+    {
+        $this->withoutMiddleware(ValidateCsrfToken::class);
+        $unit = Unit::query()->create(['name' => 'Taman Kanak-kanak', 'code' => 'TK']);
+        $employee = $this->createAttendanceEmployee($unit);
+        WorkCalendar::query()->create([
+            'unit_id' => $unit->id,
+            'date' => '2026-11-02',
+            'type' => 'workday',
+            'is_working_day' => true,
+            'start_time' => '07:00',
+            'end_time' => '15:30',
+        ]);
+        $this->createFingerprintLogs($unit, $employee, '2026-11-02', ['07:00', '10:00', '12:00']);
+        $attendance = app(AttendanceProcessingService::class);
+        $attendance->processEmployeeDate($unit->id, $employee->id, '2026-11-02');
+        $this->assertSame(
+            'perlu_verifikasi',
+            AttendanceRecord::query()->where('employee_id', $employee->id)->sole()->status->value,
+        );
+
+        $user = User::factory()->create();
+        app(HrdAccountService::class)->setUser($user);
+        $this->actingAs($user);
+        $leaveId = $this->postJson(route('leave-requests.manual.store'), [
+            'employee_id' => $employee->id,
+            'unit_id' => $unit->id,
+            'request_date' => '2026-11-02',
+            'leave_type' => 'keluar',
+        ])->assertCreated()->json('data.id');
+
+        $this->postJson(route('leave-requests.manual.confirm', $leaveId))
+            ->assertOk()
+            ->assertJsonPath('data.approval_status', LeaveApprovalStatus::Confirmed->value)
+            ->assertJsonPath('data.attendance_status', 'perlu_verifikasi');
+
+        $leave = LeaveRequest::query()->findOrFail($leaveId);
+        $record = AttendanceRecord::query()->where('employee_id', $employee->id)->sole();
+        $this->assertSame(LeaveApprovalStatus::Confirmed, $leave->approval_status);
+        $this->assertSame($leaveId, $record->leave_request_id);
+        $this->assertTrue($record->needs_verification);
+        $this->assertSame(1, $record->intervals()->count());
+
+        $period = app(AttendancePeriodReportService::class)
+            ->generate($unit->id, '2026-11-02', '2026-11-02')['data'][0];
+        $annual = app(\App\Services\Reports\AttendanceAnnualReportService::class)
+            ->generate($unit->id, 2026)['data'][0]['monthly']['November'];
+        $this->assertSame(1, $period['izin_keluar']);
+        $this->assertSame(1, $period['perlu_verifikasi']);
+        $this->assertSame($period['izin_keluar'], $annual['izin_keluar']);
+        $this->assertSame($period['perlu_verifikasi'], $annual['perlu_verifikasi']);
     }
 
     public function test_manual_leave_update_and_delete_reprocess_only_old_and_new_employee_dates(): void
@@ -355,7 +415,7 @@ class ManualLeaveRequestTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.approval_status', LeaveApprovalStatus::Confirmed->value);
         $this->assertSame(
-            'alpha',
+            'izin',
             AttendanceRecord::query()->where('employee_id', $employee->id)->whereDate('attendance_date', '2026-11-03')->firstOrFail()->status->value,
         );
         $this->assertSame(

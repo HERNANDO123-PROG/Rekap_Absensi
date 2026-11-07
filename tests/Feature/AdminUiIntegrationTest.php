@@ -119,13 +119,13 @@ class AdminUiIntegrationTest extends TestCase
         $firstPage = $this->get(route('employees.manage'))
             ->assertOk()
             ->assertSee('55 data')
-            ->assertSee('>55</div>', false)
-            ->assertSee('>0</div>', false)
             ->assertSee('Menampilkan 1–15 dari 55 pegawai')
             ->assertSee('Laboran');
 
         $this->assertSame(15, substr_count($firstPage->getContent(), '<tr class="hover:bg-slate-50">'));
         $this->assertSame(55, Employee::query()->count());
+        $this->assertSame(55, $firstPage->viewData('employees')->total());
+        $this->assertSame(4, $firstPage->viewData('employees')->lastPage());
 
         $unitFilter = $this->get(route('employees.manage', ['unit_id' => $sd->id]))
             ->assertOk()

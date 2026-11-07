@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Forms;
 
+use App\Services\HrdAccountService;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\RateLimiter;
@@ -36,7 +37,10 @@ class LoginForm extends Form
             ]);
         }
 
-        if (! Auth::attempt([
+        $hrdUserId = app(HrdAccountService::class)->userId();
+
+        if ($hrdUserId === null || ! Auth::attempt([
+            'id' => $hrdUserId,
             'name' => trim($this->username),
             'password' => $this->password,
         ], $this->remember)) {

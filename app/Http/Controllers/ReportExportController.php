@@ -10,10 +10,13 @@ use App\Services\Exports\AttendanceAnnualExportService;
 use App\Services\Exports\AttendanceFingerprintPeriodExportService;
 use App\Services\Exports\AttendancePeriodExportService;
 use App\Services\Exports\EmployeeAttendanceDetailExportService;
+use App\Services\Exports\ExcelExportHelper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use RuntimeException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Throwable;
 
 class ReportExportController extends Controller
 {
@@ -39,12 +42,11 @@ class ReportExportController extends Controller
         ]);
 
         $spreadsheet = $this->periodExport->buildSpreadsheet((int) $validated['unit_id'], $validated['start_date'], $validated['end_date']);
-        $path = tempnam(sys_get_temp_dir(), 'period-export-');
-        IOFactory::createWriter($spreadsheet, 'Xlsx')->save($path);
 
-        return response()->download($path, $this->periodExport->filename((int) $validated['unit_id'], $validated['start_date'], $validated['end_date']), [
-            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        ]);
+        return $this->downloadSpreadsheet(
+            $spreadsheet,
+            $this->periodExport->filename((int) $validated['unit_id'], $validated['start_date'], $validated['end_date']),
+        );
     }
 
     public function fingerprintPeriod(AttendanceFingerprintPeriodReportRequest $request): BinaryFileResponse
@@ -59,12 +61,8 @@ class ReportExportController extends Controller
         ]);
 
         $spreadsheet = $this->fingerprintPeriodExport->buildSpreadsheet($filters);
-        $path = tempnam(sys_get_temp_dir(), 'fingerprint-period-export-');
-        IOFactory::createWriter($spreadsheet, 'Xlsx')->save($path);
 
-        return response()->download($path, $this->fingerprintPeriodExport->filename($filters), [
-            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        ]);
+        return $this->downloadSpreadsheet($spreadsheet, $this->fingerprintPeriodExport->filename($filters));
     }
 
     public function annual(Request $request): BinaryFileResponse
@@ -80,12 +78,11 @@ class ReportExportController extends Controller
         ]);
 
         $spreadsheet = $this->annualExport->buildSpreadsheet((int) $validated['unit_id'], (int) $validated['year']);
-        $path = tempnam(sys_get_temp_dir(), 'annual-export-');
-        IOFactory::createWriter($spreadsheet, 'Xlsx')->save($path);
 
-        return response()->download($path, $this->annualExport->filename((int) $validated['unit_id'], (int) $validated['year']), [
-            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        ]);
+        return $this->downloadSpreadsheet(
+            $spreadsheet,
+            $this->annualExport->filename((int) $validated['unit_id'], (int) $validated['year']),
+        );
     }
 
     public function employee(Request $request, Employee $employee): BinaryFileResponse
@@ -112,12 +109,28 @@ class ReportExportController extends Controller
         ]);
 
         $spreadsheet = $this->employeeExport->buildSpreadsheet($employee, $validated['start_date'], $validated['end_date']);
-        $path = tempnam(sys_get_temp_dir(), 'employee-export-');
-        IOFactory::createWriter($spreadsheet, 'Xlsx')->save($path);
 
-        return response()->download($path, $this->employeeExport->filename($employee, $validated['start_date'], $validated['end_date']), [
-            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        ]);
+        return $this->downloadSpreadsheet(
+            $spreadsheet,
+            $this->employeeExport->filename($employee, $validated['start_date'], $validated['end_date']),
+        );
+    }
+
+    private function downloadSpreadsheet(Spreadsheet $spreadsheet, string $filename): BinaryFileResponse
+    {
+        $path = ExcelExportHelper::downloadPath($spreadsheet);
+
+        try {
+            return response()->download($path, $filename, [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            ])->deleteFileAfterSend(true);
+        } catch (Throwable $exception) {
+            if (is_file($path) && ! unlink($path)) {
+                throw new RuntimeException('Unable to remove the temporary export file.', 0, $exception);
+            }
+
+            throw $exception;
+        }
     }
 
     private function audit(string $action, array $details): void

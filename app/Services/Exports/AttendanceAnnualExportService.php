@@ -25,20 +25,16 @@ class AttendanceAnnualExportService
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Rekap Tahunan');
 
-        $sheet->setCellValue('A1', 'Unit:');
-        $sheet->setCellValue('B1', $unit->code ?? $unit->name);
-        $sheet->setCellValue('A2', 'Tahun:');
-        $sheet->setCellValue('B2', (string) $year);
+        ExcelExportHelper::writeValue($sheet, 'A1', 'Unit:');
+        ExcelExportHelper::writeValue($sheet, 'B1', $unit->code ?? $unit->name);
+        ExcelExportHelper::writeValue($sheet, 'A2', 'Tahun:');
+        $sheet->setCellValue('B2', $year);
 
-        $sheet->setCellValue('A5', 'No');
-        $sheet->setCellValue('B5', 'ID Pegawai');
-        $sheet->setCellValue('C5', 'Nama');
-        $sheet->setCellValue('D5', 'Jabatan');
-        $sheet->setCellValue('E5', 'Metric');
+        ExcelExportHelper::writeRow($sheet, 5, ['No', 'ID Pegawai', 'Nama', 'Jabatan', 'Metric']);
         foreach ($months as $index => $month) {
-            $sheet->setCellValue(ExcelExportHelper::columnName($index + 6).'5', $month);
+            ExcelExportHelper::writeValue($sheet, ExcelExportHelper::columnName($index + 6).'5', $month);
         }
-        $sheet->setCellValue('R5', 'Total');
+        ExcelExportHelper::writeValue($sheet, 'R5', 'Total');
 
         foreach (range('A', 'R') as $column) {
             $sheet->getStyle($column.'5')->getFont()->setBold(true);
@@ -85,7 +81,7 @@ class AttendanceAnnualExportService
                 }
 
                 $values[] = $entry['annual'][$metric] ?? 0;
-                $sheet->fromArray($values, null, 'A'.$row, true);
+                ExcelExportHelper::writeRow($sheet, $row, $values);
                 $row++;
             }
         }

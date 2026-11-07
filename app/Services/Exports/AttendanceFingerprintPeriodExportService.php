@@ -6,9 +6,7 @@ use App\Data\Reports\AttendanceFingerprintPeriodReportFilters;
 use App\Models\Unit;
 use App\Services\Reports\AttendanceFingerprintPeriodReportService;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
-use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
-use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
 class AttendanceFingerprintPeriodExportService
 {
@@ -23,19 +21,19 @@ class AttendanceFingerprintPeriodExportService
         $spreadsheet = new Spreadsheet;
         $summarySheet = $spreadsheet->getActiveSheet();
         $summarySheet->setTitle('Rekap Pegawai');
-        $this->writeRow($summarySheet, 1, ['Unit', $unit->code ?? $unit->name]);
-        $this->writeRow($summarySheet, 2, ['Periode', $filters->startDate.' s/d '.$filters->endDate]);
-        $this->writeRow($summarySheet, 3, ['Kategori', $filters->categoryId ?? 'Semua']);
-        $this->writeRow($summarySheet, 4, ['Pencarian', $filters->search ?? '']);
+        ExcelExportHelper::writeRow($summarySheet, 1, ['Unit', $unit->code ?? $unit->name]);
+        ExcelExportHelper::writeRow($summarySheet, 2, ['Periode', $filters->startDate.' s/d '.$filters->endDate]);
+        ExcelExportHelper::writeRow($summarySheet, 3, ['Kategori', $filters->categoryId ?? 'Semua']);
+        ExcelExportHelper::writeRow($summarySheet, 4, ['Pencarian', $filters->search ?? '']);
         $headers = [
             'No', 'ID Pegawai', 'Nama', 'NIP', 'Kategori', 'Hari Kerja', 'Total Finger',
             'Hadir', 'Terlambat', 'Pulang Awal', 'Tidak Hadir', 'Izin Keluar', 'Dinas',
             'Provisional', 'Ambigu', 'Histori Terbatas',
         ];
-        $this->writeRow($summarySheet, 6, $headers);
+        ExcelExportHelper::writeRow($summarySheet, 6, $headers);
 
         foreach ($report['data'] as $index => $employee) {
-            $this->writeRow($summarySheet, $index + 7, [
+            ExcelExportHelper::writeRow($summarySheet, $index + 7, [
                 $index + 1,
                 $employee['employee_id'],
                 $employee['name'],
@@ -65,12 +63,12 @@ class AttendanceFingerprintPeriodExportService
             'Terlambat', 'Pulang Awal', 'Tidak Hadir', 'Izin Keluar', 'Dinas',
             'Jenis Izin', 'Status Persetujuan', 'Status Verifikasi', 'Alasan/Peringatan',
         ];
-        $this->writeRow($dailySheet, 1, $dailyHeaders);
+        ExcelExportHelper::writeRow($dailySheet, 1, $dailyHeaders);
         $dailyRow = 2;
         foreach ($report['data'] as $employee) {
             foreach ($employee['daily'] as $day) {
                 $metrics = $day['metrics'];
-                $this->writeRow($dailySheet, $dailyRow++, [
+                ExcelExportHelper::writeRow($dailySheet, $dailyRow++, [
                     $employee['employee_id'],
                     $employee['name'],
                     $employee['nip'] ?? '',
@@ -146,17 +144,5 @@ class AttendanceFingerprintPeriodExportService
     private function display(mixed $value): int|string
     {
         return $value === null ? 'Belum dapat ditentukan' : $value;
-    }
-
-    private function writeRow(Worksheet $sheet, int $row, array $values): void
-    {
-        foreach (array_values($values) as $index => $value) {
-            $coordinate = Coordinate::stringFromColumnIndex($index + 1).$row;
-            if (is_string($value)) {
-                $sheet->setCellValueExplicit($coordinate, $value, DataType::TYPE_STRING);
-            } else {
-                $sheet->setCellValue($coordinate, $value);
-            }
-        }
     }
 }
