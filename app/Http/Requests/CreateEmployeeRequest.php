@@ -20,7 +20,7 @@ class CreateEmployeeRequest extends FormRequest
         return [
             'unit_id' => ['required', 'integer', 'exists:units,id'],
             'category_id' => [
-                'required',
+                'nullable',
                 'integer',
                 Rule::exists('work_schedule_categories', 'id')->where('is_active', true),
             ],
@@ -32,8 +32,8 @@ class CreateEmployeeRequest extends FormRequest
                     ->where('status', EmployeeStatus::Active->value)] : []),
             ],
             'nip' => ['nullable', 'string', 'max:255'],
-            'namafinger' => ['nullable', 'string', 'max:255'],
-            'nama_lengkap' => ['nullable', 'string', 'max:255'],
+            'namafinger' => ['required', 'string', 'max:255'],
+            'nama_lengkap' => ['required', 'string', 'max:255'],
             'position' => ['nullable', 'string', 'max:255'],
             'status' => ['required', Rule::in(array_column(EmployeeStatus::cases(), 'value'))],
         ];

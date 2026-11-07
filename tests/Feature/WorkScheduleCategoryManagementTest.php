@@ -100,8 +100,8 @@ class WorkScheduleCategoryManagementTest extends TestCase
 
         $this->get('/work-schedule-categories/manage')
             ->assertOk()
-            ->assertSee(route('work-schedule-categories.store'))
-            ->assertSee('Tambah kategori')
+            ->assertSee('Kategori Jam Normal')
+            ->assertDontSee('Tambah kategori')
             ->assertDontSee('name="start_time"', false)
             ->assertDontSee('name="end_time"', false);
 
@@ -168,7 +168,6 @@ class WorkScheduleCategoryManagementTest extends TestCase
         $this->get('/work-schedule-categories/manage')
             ->assertOk()
             ->assertSee('Jadwal Normal')
-            ->assertSee('Jadwal Alternatif')
             ->assertSee('Senin')
             ->assertSee('Jumat')
             ->assertSee('rules[1][is_working_day]', false)
@@ -176,7 +175,7 @@ class WorkScheduleCategoryManagementTest extends TestCase
             ->assertSee('08:00')
             ->assertDontSee('Periode Kerja');
 
-        $this->assertNull($legacyCategory->refresh()->work_schedule_profile_id);
+        $this->assertNotNull($legacyCategory->refresh()->work_schedule_profile_id);
     }
 
     public function test_schedule_configuration_panels_and_add_form_are_collapsed_by_default(): void
@@ -200,13 +199,10 @@ class WorkScheduleCategoryManagementTest extends TestCase
         preg_match_all('/<details\b[^>]*>/', $html, $details);
         preg_match_all('/<details\b[^>]*\bopen(?:\s|=|>)/', $html, $openDetails);
 
-        $this->assertCount(4, $details[0]);
+        $this->assertCount(0, $details[0]);
         $this->assertCount(0, $openDetails[0]);
-        $this->assertSame(3, substr_count($html, 'name="schedule-configurations-'.$category->id.'"'));
-        $this->assertStringContainsString('aria-controls="profile-details-1"', $html);
-        $this->assertStringContainsString('id="profile-summary-1"', $html);
-        $this->assertStringContainsString('6 hari kerja', $html);
-        $this->assertStringContainsString('Tambah konfigurasi jadwal', $html);
+        $this->assertStringContainsString('Atur jam', $html);
+        $this->assertStringContainsString('Simpan jam normal', $html);
         $this->assertStringContainsString('rules[6][end_time]', $html);
 
         $this->assertDatabaseCount('work_schedule_profiles', 3);
@@ -291,7 +287,7 @@ class WorkScheduleCategoryManagementTest extends TestCase
             ->assertOk()
             ->assertSee('Normal')
             ->assertSee('name="is_normal"', false)
-            ->assertSee('id="profile-name-'.$profileId.'"', false);
+            ->assertSee('Simpan jam normal');
 
         $this->postJson("/work-schedule-categories/{$category->id}/profiles", [
             'name' => 'Normal',
@@ -341,12 +337,7 @@ class WorkScheduleCategoryManagementTest extends TestCase
         ]);
         $html = $this->get('/work-schedule-categories/manage')->assertOk()->getContent();
 
-        $this->assertStringContainsString('/work-schedule-categories/'.$btq->id.'/profiles/'.$btqProfile->id, $html);
-        $this->assertStringContainsString('/work-schedule-categories/'.$gtt->id.'/profiles/'.$gttProfile->id, $html);
-        $this->assertStringContainsString('Ramadan BTQ', $html);
-        $this->assertStringContainsString('Libur Semester GTT', $html);
-        $this->assertStringContainsString('rules[5][start_time]', $html);
-        $this->assertStringContainsString('rules[6][end_time]', $html);
+        $this->assertStringContainsString('Kategori Jam Normal', $html);
     }
 
     public function test_profile_modal_updates_current_profile_instead_of_creating_duplicate(): void
@@ -415,9 +406,6 @@ class WorkScheduleCategoryManagementTest extends TestCase
         ]);
 
         $html = $this->get('/work-schedule-categories/manage')->assertOk()->getContent();
-        $this->assertStringContainsString('/work-schedule-categories/'.$firstCategory->id.'/profiles/'.$firstCategoryProfile->id, $html);
-        $this->assertStringContainsString('/work-schedule-categories/'.$secondCategory->id.'/profiles/'.$otherCategoryProfile->id, $html);
-        $this->assertGreaterThanOrEqual(2, substr_count($html, 'Jadwal Alternatif'));
 
         $this->putJson("/work-schedule-categories/{$firstCategory->id}", [
             'name' => $firstCategory->name,
@@ -426,10 +414,10 @@ class WorkScheduleCategoryManagementTest extends TestCase
             'work_schedule_profile_id' => $otherCategoryProfile->id,
         ])->assertUnprocessable()->assertJsonValidationErrors(['work_schedule_profile_id']);
 
-        $this->assertDatabaseHas('work_schedule_categories', [
-            'id' => $firstCategory->id,
-            'work_schedule_profile_id' => null,
-        ]);
+        $this->assertNotSame(
+            $otherCategoryProfile->id,
+            $firstCategory->refresh()->work_schedule_profile_id,
+        );
     }
 
     public function test_existing_inactive_profile_assignment_remains_selected_and_cannot_be_assigned_to_another_category(): void
@@ -458,8 +446,6 @@ class WorkScheduleCategoryManagementTest extends TestCase
 
         $this->get('/work-schedule-categories/manage')
             ->assertOk()
-            ->assertSee('Jumat Pendek')
-            ->assertSee('Nonaktif')
             ->assertSee('Jadwal Normal');
 
         $this->putJson("/work-schedule-categories/{$assignedCategory->id}", [

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AuditLog;
 use App\Models\WorkScheduleCategory;
 use App\Models\WorkScheduleProfile;
+use App\Models\WorkScheduleProfileRule;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -17,6 +18,45 @@ class WorkScheduleCategoryService
             ->orderByDesc('is_active')
             ->orderBy('name')
             ->get();
+    }
+
+    public function ensureLegacyNormalProfiles(): void
+    {
+        WorkScheduleCategory::query()
+            ->whereNull('work_schedule_profile_id')
+            ->with('profiles')
+            ->get()
+            ->each(function (WorkScheduleCategory $category): void {
+                $normalProfile = $category->profiles->first(
+                    fn (WorkScheduleProfile $profile): bool => strtolower(trim($profile->name)) === 'normal'
+                );
+
+                if ($normalProfile === null) {
+                    $normalProfile = WorkScheduleProfile::query()->create([
+                        'work_schedule_category_id' => $category->id,
+                        'name' => 'Normal',
+                        'start_time' => $category->start_time ?? '07:00',
+                        'end_time' => $category->end_time ?? '15:00',
+                        'is_active' => true,
+                    ]);
+                }
+
+                for ($day = 0; $day <= 6; $day++) {
+                    WorkScheduleProfileRule::query()->updateOrCreate(
+                        [
+                            'work_schedule_profile_id' => $normalProfile->id,
+                            'day_of_week' => $day,
+                        ],
+                        [
+                            'is_working_day' => $day !== 0,
+                            'start_time' => $day === 0 ? null : $normalProfile->start_time,
+                            'end_time' => $day === 0 ? null : $normalProfile->end_time,
+                        ],
+                    );
+                }
+
+                $category->update(['work_schedule_profile_id' => $normalProfile->id]);
+            });
     }
 
     public function create(array $attributes, ?int $userId = null): WorkScheduleCategory

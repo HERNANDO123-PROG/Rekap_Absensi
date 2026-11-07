@@ -14,6 +14,13 @@ class WorkScheduleCategoryController extends Controller
 {
     public function __construct(private readonly WorkScheduleCategoryService $categories) {}
 
+    public function manage()
+    {
+        $this->categories->ensureLegacyNormalProfiles();
+
+        return view('livewire.work-schedule-categories.manage');
+    }
+
     public function storeProfile(
         Request $request,
         WorkScheduleCategory $category,

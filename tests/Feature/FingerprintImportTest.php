@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\EmployeeStatus;
 use App\Enums\ImportBatchStatus;
 use App\Enums\MatchingStatus;
 use App\Models\Employee;
@@ -215,6 +216,33 @@ class FingerprintImportTest extends TestCase
         $this->assertNull($employee->nip);
         $this->assertNull($employee->position);
         $this->assertSame('2', $employee->fingerprint_id);
+    }
+
+    public function test_sync_matches_manual_employee_by_fingerprint_name_and_fills_identity(): void
+    {
+        $unit = $this->createUnit('TK');
+        $employee = Employee::create([
+            'unit_id' => $unit->id,
+            'namafinger' => 'Intan~',
+            'nama_lengkap' => 'Intan Permata Sari',
+            'status' => EmployeeStatus::Active,
+        ]);
+        $file = $this->createFixture('xls');
+
+        $result = app(FingerprintImportService::class)->syncEmployees(
+            $this->uploadedFile($file, 'manual-fingerprint-match.xls'),
+            $unit->id,
+        );
+
+        $employee->refresh();
+        $category = WorkScheduleCategory::query()->where('name', 'TK')->first();
+
+        $this->assertSame('12', $employee->fingerprint_id);
+        $this->assertNotNull($category);
+        $this->assertSame($category->id, $employee->category_id);
+        $this->assertSame('Intan Permata Sari', $employee->nama_lengkap);
+        $this->assertSame(1, $result['employees_existing']);
+        $this->assertDatabaseCount('employees', 2);
     }
 
     public function test_sync_endpoint_creates_employees_and_unconfigured_categories_idempotently(): void

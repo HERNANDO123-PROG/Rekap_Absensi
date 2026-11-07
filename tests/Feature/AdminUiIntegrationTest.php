@@ -186,7 +186,7 @@ class AdminUiIntegrationTest extends TestCase
             ->assertSee('NIP')
             ->assertSee('1987654321')
             ->assertDontSee('FP-INTERNAL-SECRET')
-            ->assertSee('name="fingerprint_id"', false)
-            ->assertSee('ID Fingerprint');
+            ->assertSee('name="namafinger"', false)
+            ->assertDontSee('name="fingerprint_id"', false);
     }
 }

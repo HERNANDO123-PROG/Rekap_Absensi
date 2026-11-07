@@ -42,7 +42,7 @@ Route::middleware(['auth'])->group(function () {
     Route::view('fingerprint-import', 'livewire.fingerprint-import.index')->name('fingerprint-import.index');
     Route::view('leave-import', 'livewire.leave-import.index')->name('leave-import.index');
     Route::view('work-schedule', 'livewire.work-schedule.index')->name('work-schedule.index');
-    Route::view('work-schedule-categories/manage', 'livewire.work-schedule-categories.manage')->name('work-schedule-categories.manage');
+    Route::get('work-schedule-categories/manage', [WorkScheduleCategoryController::class, 'manage'])->name('work-schedule-categories.manage');
     Route::view('work-calendar', 'livewire.work-calendar.index')->name('work-calendar.index');
     Route::view('rekap-periode', 'livewire.reports.period')->name('rekap.period');
     Route::get('rekap/pegawai/{employee}/fingerprint', [FingerprintPeriodReportController::class, 'show'])

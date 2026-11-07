@@ -97,12 +97,13 @@
             <span class="text-sm text-slate-500">Menu utama</span>
         </div>
 
-        <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             @foreach ([
                 ['label' => 'Upload Fingerprint', 'href' => route('fingerprint-import.index'), 'tone' => 'bg-cyan-50 text-cyan-700'],
                 ['label' => 'Upload Data Izin', 'href' => route('leave-import.index'), 'tone' => 'bg-emerald-50 text-emerald-700'],
                 ['label' => 'Pegawai', 'href' => route('employees.manage'), 'tone' => 'bg-violet-50 text-violet-700'],
                 ['label' => 'Kalender Kerja', 'href' => route('work-calendar.index'), 'tone' => 'bg-pink-50 text-pink-700'],
+                ['label' => 'Kategori Jam Kerja', 'href' => route('work-schedule-categories.manage'), 'tone' => 'bg-amber-50 text-amber-700'],
                 ['label' => 'Rekap Periode', 'href' => route('rekap.period'), 'tone' => 'bg-slate-100 text-slate-700'],
             ] as $item)
                 <a href="{{ $item['href'] }}" class="rounded-xl border border-slate-200 px-3 py-3 text-sm font-medium transition hover:bg-slate-50 {{ $item['tone'] }}">

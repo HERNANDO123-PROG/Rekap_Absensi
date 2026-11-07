@@ -247,14 +247,13 @@
             <h3 class="text-lg font-semibold text-slate-900">Tambah pegawai</h3>
             <form data-api-form data-endpoint="{{ route('employees.store') }}" data-reload-on-success="true" class="mt-4 grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <div><label for="employee-unit" class="mb-1 block text-sm font-medium text-slate-700">Unit</label><select id="employee-unit" name="unit_id" required class="w-full rounded-lg border-slate-300 text-sm">@foreach ($units as $unit)<option value="{{ $unit->id }}">{{ $unit->code ?? $unit->name }}</option>@endforeach</select></div>
-                <div><label for="employee-namafinger" class="mb-1 block text-sm font-medium text-slate-700">Nama Fingerprint</label><input id="employee-namafinger" value="" placeholder="Terisi dari import fingerprint" disabled class="w-full rounded-lg border-slate-300 bg-slate-100 text-sm"></div>
-                <div><label for="employee-full-name" class="mb-1 block text-sm font-medium text-slate-700">Nama Lengkap</label><input id="employee-full-name" name="nama_lengkap" maxlength="255" class="w-full rounded-lg border-slate-300 text-sm"></div>
+                <div><label for="employee-namafinger" class="mb-1 block text-sm font-medium text-slate-700">Nama Fingerprint</label><input id="employee-namafinger" name="namafinger" maxlength="255" required class="w-full rounded-lg border-slate-300 text-sm"></div>
+                <div><label for="employee-full-name" class="mb-1 block text-sm font-medium text-slate-700">Nama Lengkap</label><input id="employee-full-name" name="nama_lengkap" maxlength="255" required class="w-full rounded-lg border-slate-300 text-sm"></div>
                 <div><label for="employee-nip" class="mb-1 block text-sm font-medium text-slate-700">NIP</label><input id="employee-nip" name="nip" maxlength="255" class="w-full rounded-lg border-slate-300 text-sm"></div>
-                <div><label for="employee-fingerprint-id" class="mb-1 block text-sm font-medium text-slate-700">ID Fingerprint</label><input id="employee-fingerprint-id" name="fingerprint_id" maxlength="64" class="w-full rounded-lg border-slate-300 text-sm"></div>
                 <div><label for="employee-position" class="mb-1 block text-sm font-medium text-slate-700">Jabatan</label><input id="employee-position" name="position" maxlength="255" class="w-full rounded-lg border-slate-300 text-sm"></div>
                 <div>
                     <label for="employee-category" class="mb-1 block text-sm font-medium text-slate-700">Kategori</label>
-                    <select id="employee-category" name="category_id" required data-schedule-category-select class="w-full rounded-lg border-slate-300 text-sm">
+                    <select id="employee-category" name="category_id" data-schedule-category-select class="w-full rounded-lg border-slate-300 text-sm">
                         <option value="">Pilih kategori</option>
                         @foreach ($activeCategories as $category)
                             <option value="{{ $category->id }}" data-category-active="true">{{ $category->name }}</option>

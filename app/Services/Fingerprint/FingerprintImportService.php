@@ -371,6 +371,43 @@ class FingerprintImportService
                 }
 
                 $this->updateFingerprintName($employee, $name);
+                $this->updateSyncedCategory($employee, $row['employee_department_raw'] ?? null, $categoriesCreated);
+
+                continue;
+            }
+
+            $name = trim((string) ($row['employee_name_raw'] ?? ''));
+            $employee = $this->findEmployeeByFingerprintName($unitId, $name);
+            if ($employee !== null) {
+                if ($employee->fingerprint_id !== null && trim((string) $employee->fingerprint_id) !== '') {
+                    $conflicts[] = [
+                        'fingerprint_id' => $fingerprintId,
+                        'master_name' => $employee->namafinger,
+                        'file_name' => $name,
+                        'reason' => 'Nama fingerprint cocok, tetapi pegawai sudah memiliki ID fingerprint yang berbeda.',
+                    ];
+                    continue;
+                }
+
+                $occupied = Employee::query()
+                    ->where('unit_id', $unitId)
+                    ->where('fingerprint_id', $fingerprintId)
+                    ->whereKeyNot($employee->id)
+                    ->exists();
+                if ($occupied) {
+                    $conflicts[] = [
+                        'fingerprint_id' => $fingerprintId,
+                        'master_name' => $employee->namafinger,
+                        'file_name' => $name,
+                        'reason' => 'ID fingerprint sudah digunakan oleh pegawai lain.',
+                    ];
+                    continue;
+                }
+
+                $employee->fingerprint_id = $fingerprintId;
+                $employee->save();
+                $existing++;
+                $this->updateSyncedCategory($employee, $row['employee_department_raw'] ?? null, $categoriesCreated);
 
                 continue;
             }
@@ -403,6 +440,42 @@ class FingerprintImportService
             'categories_created' => $categoriesCreated,
             'conflicts' => $conflicts,
         ];
+    }
+
+    private function findEmployeeByFingerprintName(int $unitId, string $name): ?Employee
+    {
+        $normalizedName = $this->normalizer->normalize($name);
+
+        if ($normalizedName === '') {
+            return null;
+        }
+
+        $matches = Employee::query()
+            ->where('unit_id', $unitId)
+            ->whereNotNull('namafinger')
+            ->get()
+            ->filter(fn (Employee $employee): bool =>
+                $this->normalizer->normalize((string) $employee->namafinger) === $normalizedName
+            )
+            ->values();
+
+        return $matches->count() === 1 ? $matches->first() : null;
+    }
+
+    private function updateSyncedCategory(Employee $employee, mixed $department, int &$categoriesCreated): void
+    {
+        if (! is_string($department) || trim($department) === '') {
+            return;
+        }
+
+        $categoryId = $this->resolveCategoryId(trim($department), $categoriesCreated);
+        if ($categoryId === null || $employee->category_id === $categoryId) {
+            return;
+        }
+
+        $employee->category_id = $categoryId;
+        $employee->work_schedule_profile_id = null;
+        $employee->save();
     }
 
     private function resolveCategoryId(string $department, ?int &$categoriesCreated = null): ?int
