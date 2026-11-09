@@ -3,8 +3,6 @@
 namespace Tests\Feature;
 
 use App\Models\User;
-use App\Models\WorkScheduleCategory;
-use App\Models\WorkScheduleProfile;
 use App\Services\WorkScheduleCategoryService;
 use App\Services\WorkScheduleProfileService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -109,7 +107,9 @@ class WorkScheduleCategoryManagementTest extends TestCase
 
         $this->get('/work-schedule-categories/manage?tab=periode-khusus')
             ->assertOk()
-            ->assertSee('Periode Khusus');
+            ->assertSee('Periode Khusus')
+            ->assertSee('--:-- (belum diatur)')
+            ->assertDontSee('Perubahan hanya tersimpan sementara');
 
         $categoryId = $this->postJson('/work-schedule-categories', [
             'name' => 'Kategori Admin',

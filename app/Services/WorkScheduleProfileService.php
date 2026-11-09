@@ -158,7 +158,7 @@ class WorkScheduleProfileService
             throw ValidationException::withMessages(['name' => 'Nama profil wajib diisi maksimal 255 karakter.']);
         }
 
-        $rules = $this->normalizeRules($attributes);
+        $rules = $this->normalizeRules($attributes, $profile?->schedule_type === 'special');
         $firstWorkingRule = collect($rules)->firstWhere('is_working_day', true);
 
         $data = [
@@ -185,7 +185,7 @@ class WorkScheduleProfileService
         return [$data, $rules];
     }
 
-    private function normalizeRules(array $attributes): array
+    private function normalizeRules(array $attributes, bool $allowUnsetWorkingHours = false): array
     {
         if (! array_key_exists('rules', $attributes)) {
             $start = $this->normalizeTime($attributes['start_time'] ?? null, 'start_time');
@@ -224,10 +224,18 @@ class WorkScheduleProfileService
             }
 
             if ($isWorkingDay) {
-                $start = $this->normalizeTime($rule['start_time'] ?? null, "rules.{$day}.start_time");
-                $end = $this->normalizeTime($rule['end_time'] ?? null, "rules.{$day}.end_time");
-                if ($end <= $start) {
-                    throw ValidationException::withMessages(["rules.{$day}.end_time" => 'Jam selesai harus setelah jam masuk.']);
+                $rawStart = $rule['start_time'] ?? null;
+                $rawEnd = $rule['end_time'] ?? null;
+
+                if ($allowUnsetWorkingHours && ($rawStart === null || $rawStart === '') && ($rawEnd === null || $rawEnd === '')) {
+                    $start = null;
+                    $end = null;
+                } else {
+                    $start = $this->normalizeTime($rawStart, "rules.{$day}.start_time");
+                    $end = $this->normalizeTime($rawEnd, "rules.{$day}.end_time");
+                    if ($end <= $start) {
+                        throw ValidationException::withMessages(["rules.{$day}.end_time" => 'Jam selesai harus setelah jam masuk.']);
+                    }
                 }
             } else {
                 if (($rule['start_time'] ?? '') !== '' && ($rule['start_time'] ?? null) !== null) {

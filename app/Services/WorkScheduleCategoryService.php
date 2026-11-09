@@ -35,8 +35,8 @@ class WorkScheduleCategoryService
                     $normalProfile = WorkScheduleProfile::query()->create([
                         'work_schedule_category_id' => $category->id,
                         'name' => 'Normal',
-                        'start_time' => $category->start_time ?? '07:00',
-                        'end_time' => $category->end_time ?? '15:00',
+                        'start_time' => $category->start_time ?? '06:55',
+                        'end_time' => $category->end_time ?? '15:40',
                         'is_active' => true,
                     ]);
                 }

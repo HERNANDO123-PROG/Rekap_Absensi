@@ -147,6 +147,7 @@
                     categories: @js($categories->map(fn ($category) => ['id' => $category->id, 'name' => $category->name])->values()),
                     selectedCategories: [],
                     activeCategory: null,
+                    specialSaveStatus: '',
                     async loadPeriods() {
                         const response = await fetch('{{ route('special-work-schedule-periods.index') }}', { headers: { Accept: 'application/json' } });
                         if (!response.ok) return;
@@ -171,6 +172,7 @@
                         this.endDate = period?.endDate ?? '';
                         this.selectedCategories = period?.categories.map(category => category.id) ?? [];
                         this.activeCategory = null;
+                        this.specialSaveStatus = '';
                         this.formOpen = true;
                     },
                     async addPeriod() {
@@ -210,26 +212,45 @@
                         data.append('_method', 'PUT');
                         data.append('name', category.name);
                         data.append('is_normal', '0');
+                        this.specialSaveStatus = '';
 
                         rows.forEach((row) => {
                             const day = row.dataset.specialDay;
                             const working = row.querySelector('[data-special-working]').value === '1';
                             data.append(`rules[${day}][is_working_day]`, working ? '1' : '0');
-                            data.append(`rules[${day}][start_time]`, row.querySelector('[data-special-start]').value || '');
-                            data.append(`rules[${day}][end_time]`, row.querySelector('[data-special-end]').value || '');
+                            data.append(`rules[${day}][start_time]`, row.querySelector('[data-special-start]').value);
+                            data.append(`rules[${day}][end_time]`, row.querySelector('[data-special-end]').value);
                         });
 
-                        await fetch(`/work-schedule-categories/${category.id}/profiles/${category.profileId}`, {
-                            method: 'POST',
-                            headers: {
-                                Accept: 'application/json',
-                                'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]')?.content || ''
-                            },
-                            body: data,
-                        });
+                        let response;
+                        try {
+                            response = await fetch(`/work-schedule-categories/${category.id}/profiles/${category.profileId}`, {
+                                method: 'POST',
+                                headers: {
+                                    Accept: 'application/json',
+                                    'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]')?.content || ''
+                                },
+                                body: data,
+                            });
+                        } catch {
+                            this.specialSaveStatus = 'Jadwal gagal disimpan. Periksa koneksi lalu coba lagi.';
+                            return;
+                        }
+
+                        const payload = await response.json();
+                        if (!response.ok) {
+                            this.specialSaveStatus = Object.values(payload.errors || {}).flat().join(' ')
+                                || payload.message
+                                || 'Jadwal gagal disimpan.';
+                            return;
+                        }
+
                         await this.loadPeriods();
-                        this.formOpen = false;
-                        this.activeCategory = null;
+                        const savedCategory = this.periods
+                            .flatMap(period => period.categories)
+                            .find(item => item.profileId === category.profileId);
+                        this.activeCategory = savedCategory || category;
+                        this.specialSaveStatus = 'Jadwal berhasil disimpan.';
                     },
                     formatDate(value) {
                         if (!value) return '-';
@@ -371,8 +392,14 @@
                                                             <option value="0">Libur</option>
                                                         </select>
                                                     </td>
-                                                    <td class="px-3 py-2"><input data-special-start x-bind:value="activeCategory?.rules.find(rule => Number(rule.day_of_week) === {{ $day }})?.start_time?.substring(0, 5) || ''" type="time" class="w-full rounded-lg border-slate-300 py-1 text-xs"></td>
-                                                    <td class="px-3 py-2"><input data-special-end x-bind:value="activeCategory?.rules.find(rule => Number(rule.day_of_week) === {{ $day }})?.end_time?.substring(0, 5) || ''" type="time" class="w-full rounded-lg border-slate-300 py-1 text-xs"></td>
+                                                    <td class="px-3 py-2">
+                                                        <input data-special-start x-bind:value="activeCategory?.rules.find(rule => Number(rule.day_of_week) === {{ $day }})?.start_time?.substring(0, 5) || ''" x-on:input="activeCategory.rules.find(rule => Number(rule.day_of_week) === {{ $day }}).start_time = $event.target.value" type="time" class="w-full rounded-lg border-slate-300 py-1 text-xs">
+                                                        <span x-show="activeCategory?.rules.find(rule => Number(rule.day_of_week) === {{ $day }})?.is_working_day && !activeCategory?.rules.find(rule => Number(rule.day_of_week) === {{ $day }})?.start_time" aria-hidden="true" class="mt-1 block text-[10px] text-slate-400">--:-- (belum diatur)</span>
+                                                    </td>
+                                                    <td class="px-3 py-2">
+                                                        <input data-special-end x-bind:value="activeCategory?.rules.find(rule => Number(rule.day_of_week) === {{ $day }})?.end_time?.substring(0, 5) || ''" x-on:input="activeCategory.rules.find(rule => Number(rule.day_of_week) === {{ $day }}).end_time = $event.target.value" type="time" class="w-full rounded-lg border-slate-300 py-1 text-xs">
+                                                        <span x-show="activeCategory?.rules.find(rule => Number(rule.day_of_week) === {{ $day }})?.is_working_day && !activeCategory?.rules.find(rule => Number(rule.day_of_week) === {{ $day }})?.end_time" aria-hidden="true" class="mt-1 block text-[10px] text-slate-400">--:-- (belum diatur)</span>
+                                                    </td>
                                                 </tr>
                                             @endforeach
                                         </tbody>
@@ -380,7 +407,7 @@
                                     </div>
                                 </div>
                                 <div class="flex items-center justify-between gap-3 border-t border-slate-200 px-5 py-4">
-                                    <p class="text-xs text-slate-500">Perubahan hanya tersimpan sementara pada frontend.</p>
+                                    <p role="status" aria-live="polite" class="text-xs text-slate-500" x-text="specialSaveStatus || 'Jam kosong ditandai --:-- dan belum dikonfigurasi.'"></p>
                                     <button type="button" x-on:click="saveSpecialSchedule(activeCategory)" class="rounded-lg bg-cyan-800 px-4 py-2 text-xs font-semibold text-white hover:bg-cyan-900">Simpan jam</button>
                                 </div>
                             </div>

@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\WorkScheduleCategory;
 use App\Models\WorkScheduleProfile;
+use App\Services\SpecialWorkSchedulePeriodService;
 use App\Services\WorkScheduleCategoryService;
 use App\Services\WorkScheduleProfileService;
 use Illuminate\Database\QueryException;
@@ -158,6 +159,41 @@ class WorkScheduleProfileManagementTest extends TestCase
 
         $this->assertDatabaseCount('work_schedule_profiles', 0);
         $this->assertDatabaseCount('work_schedule_profile_rules', 0);
+    }
+
+    public function test_new_special_period_profiles_start_without_inherited_hours_and_allow_unset_working_hours(): void
+    {
+        $category = $this->category();
+        $period = app(SpecialWorkSchedulePeriodService::class)->create([
+            'name' => 'Ramadan',
+            'start_date' => '2027-01-11',
+            'end_date' => '2027-02-12',
+            'category_ids' => [$category->id],
+        ]);
+        $profile = $period->periodCategories->firstOrFail()->profile;
+
+        $this->assertSame('special', $profile->schedule_type);
+        $this->assertNull($profile->start_time);
+        $this->assertNull($profile->end_time);
+        $this->assertTrue($profile->rules->firstWhere('day_of_week', 1)->is_working_day);
+        $this->assertNull($profile->rules->firstWhere('day_of_week', 1)->start_time);
+        $this->assertNull($profile->rules->firstWhere('day_of_week', 1)->end_time);
+
+        $saved = app(WorkScheduleProfileService::class)->saveForCategory($category, [
+            'name' => $profile->name,
+            'is_normal' => '0',
+            'rules' => $this->weeklyRules('', ''),
+        ], $profile);
+
+        $this->assertNull($saved->rules->firstWhere('day_of_week', 1)->start_time);
+        $this->assertNull($saved->rules->firstWhere('day_of_week', 1)->end_time);
+        $this->assertDatabaseHas('work_schedule_profile_rules', [
+            'work_schedule_profile_id' => $profile->id,
+            'day_of_week' => 1,
+            'is_working_day' => true,
+            'start_time' => null,
+            'end_time' => null,
+        ]);
     }
 
     public function test_profile_can_be_updated_and_active_status_must_be_a_valid_boolean(): void

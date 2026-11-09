@@ -49,7 +49,7 @@ class SpecialWorkSchedulePeriodService
             $this->syncCategories($period, $attributes['category_ids'] ?? [], true);
             foreach ($period->periodCategories()->with('category', 'profile')->get() as $entry) {
                 $entry->profile->update([
-                    'name' => $period->name . ' - ' . $entry->category->name,
+                    'name' => $period->name.' - '.$entry->category->name,
                 ]);
             }
 
@@ -107,9 +107,9 @@ class SpecialWorkSchedulePeriodService
             $profile = WorkScheduleProfile::query()->create([
                 'work_schedule_category_id' => $category->id,
                 'schedule_type' => 'special',
-                'name' => $period->name . ' - ' . $category->name,
-                'start_time' => $normalProfile?->start_time,
-                'end_time' => $normalProfile?->end_time,
+                'name' => $period->name.' - '.$category->name,
+                'start_time' => null,
+                'end_time' => null,
                 'is_active' => true,
             ]);
 
@@ -119,8 +119,8 @@ class SpecialWorkSchedulePeriodService
                     'work_schedule_profile_id' => $profile->id,
                     'day_of_week' => $day,
                     'is_working_day' => (bool) ($normalRule?->is_working_day ?? ($day !== 0)),
-                    'start_time' => $normalRule?->is_working_day ? $normalRule->start_time : null,
-                    'end_time' => $normalRule?->is_working_day ? $normalRule->end_time : null,
+                    'start_time' => null,
+                    'end_time' => null,
                 ]);
             }
 
