@@ -19,11 +19,14 @@ use App\Models\WorkCalendar;
 use App\Models\WorkSchedule;
 use App\Models\WorkSchedulePeriod;
 use App\Models\WorkScheduleProfileRule;
+use App\Services\Attendance\AttendanceDateResolver;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
 class AttendanceFingerprintPeriodReportService
 {
+    public function __construct(private readonly AttendanceDateResolver $dateResolver) {}
+
     public function generate(AttendanceFingerprintPeriodReportFilters $filters): array
     {
         $allUnitEmployees = Employee::query()
@@ -513,6 +516,36 @@ class AttendanceFingerprintPeriodReportService
         ?WorkSchedule $weekly,
         ?WorkSchedulePeriod $period = null,
     ): array {
+        $resolved = $this->dateResolver->resolve(
+            (int) $employee->unit_id,
+            $date,
+            $employee->category_id === null ? null : (int) $employee->category_id,
+            $employee,
+        );
+
+        if (! $resolved['missing_schedule']) {
+            $start = $resolved['start_time'];
+            $end = $resolved['end_time'];
+            $isWorkingDay = $resolved['is_working_day'];
+
+            return [
+                'start' => $start,
+                'end' => $end,
+                'source' => $resolved['source'],
+                'valid' => $isWorkingDay
+                    && $this->validTime($start)
+                    && $this->validTime($end)
+                    && $end > $start,
+                'overnight' => $isWorkingDay
+                    && $this->validTime($start)
+                    && $this->validTime($end)
+                    && $end <= $start,
+                'history_limited' => str_starts_with((string) $resolved['source'], 'category_')
+                    || $resolved['source'] === 'special_work_schedule_period',
+                'is_working_day' => $isWorkingDay,
+            ];
+        }
+
         $start = null;
         $end = null;
         $source = null;

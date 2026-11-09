@@ -101,9 +101,15 @@ class WorkScheduleCategoryManagementTest extends TestCase
         $this->get('/work-schedule-categories/manage')
             ->assertOk()
             ->assertSee('Kategori Jam Normal')
+            ->assertSee('Periode Khusus')
+            ->assertDontSee('Agenda Prioritas')
             ->assertDontSee('Tambah kategori')
             ->assertDontSee('name="start_time"', false)
             ->assertDontSee('name="end_time"', false);
+
+        $this->get('/work-schedule-categories/manage?tab=periode-khusus')
+            ->assertOk()
+            ->assertSee('Periode Khusus');
 
         $categoryId = $this->postJson('/work-schedule-categories', [
             'name' => 'Kategori Admin',

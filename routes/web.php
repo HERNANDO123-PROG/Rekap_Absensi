@@ -12,8 +12,9 @@ use App\Http\Controllers\ReportController;
 use App\Http\Controllers\ReportExportController;
 use App\Http\Controllers\WorkCalendarController;
 use App\Http\Controllers\WorkScheduleCategoryController;
-use App\Http\Controllers\WorkScheduleController;
 use App\Http\Controllers\WorkSchedulePeriodController;
+use App\Http\Controllers\SpecialWorkSchedulePeriodController;
+use App\Http\Controllers\WorkScheduleController;
 use App\Models\Employee;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
@@ -176,6 +177,11 @@ Route::middleware('auth')->group(function () {
     Route::post('/work-schedule-periods', [WorkSchedulePeriodController::class, 'store'])->name('work-schedule-periods.store');
     Route::put('/work-schedule-periods/{period}', [WorkSchedulePeriodController::class, 'update'])->name('work-schedule-periods.update');
     Route::delete('/work-schedule-periods/{period}', [WorkSchedulePeriodController::class, 'destroy'])->name('work-schedule-periods.destroy');
+
+    Route::get('/special-work-schedule-periods', [SpecialWorkSchedulePeriodController::class, 'index'])->name('special-work-schedule-periods.index');
+    Route::post('/special-work-schedule-periods', [SpecialWorkSchedulePeriodController::class, 'store'])->name('special-work-schedule-periods.store');
+    Route::put('/special-work-schedule-periods/{period}', [SpecialWorkSchedulePeriodController::class, 'update'])->name('special-work-schedule-periods.update');
+    Route::delete('/special-work-schedule-periods/{period}', [SpecialWorkSchedulePeriodController::class, 'destroy'])->name('special-work-schedule-periods.destroy');
 });
 
 require __DIR__.'/auth.php';

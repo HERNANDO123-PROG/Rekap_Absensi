@@ -4,6 +4,7 @@ namespace App\Services\Calendar;
 
 use App\Enums\WorkCalendarType;
 use App\Models\Employee;
+use App\Models\SpecialWorkSchedulePeriodCategory;
 use App\Models\Unit;
 use App\Models\WorkCalendar;
 use App\Models\WorkSchedule;
@@ -44,6 +45,64 @@ class CalendarResolver
             ->where('unit_id', $unitId)
             ->whereDate('date', $date)
             ->first();
+
+        if ($categoryId !== null) {
+            $specialEntries = SpecialWorkSchedulePeriodCategory::query()
+                ->with(['period', 'profile.rules'])
+                ->where('work_schedule_category_id', $categoryId)
+                ->whereHas('period', function ($query) use ($date): void {
+                    $query->where('is_active', true)
+                        ->whereDate('start_date', '<=', $date)
+                        ->whereDate('end_date', '>=', $date);
+                })
+                ->get();
+
+            if ($specialEntries->pluck('period.id')->filter()->unique()->count() > 1) {
+                return [
+                    ...$this->missing($unitId, $date),
+                    'schedule_conflict' => true,
+                    'source' => 'special_work_schedule_period',
+                ];
+            }
+
+            if ($specialEntry = $specialEntries->first()) {
+                if ($calendar !== null && ! $calendar->is_working_day) {
+                    return $this->resolveEntry($unitId, $date, 'calendar', $calendar, $calendar);
+                }
+
+                $rule = $specialEntry->profile?->rules
+                    ->firstWhere('day_of_week', $parsedDate->dayOfWeek);
+
+                if ($rule === null) {
+                    return [
+                        ...$this->invalidSchedule($unitId, $date, 'special_work_schedule_period'),
+                        'title' => $specialEntry->period->name,
+                    ];
+                }
+
+                $resolved = $this->resolveEntry(
+                    $unitId,
+                    $date,
+                    'special_work_schedule_period',
+                    $rule,
+                );
+
+                if ($rule->is_working_day && ! $this->hasValidTimeRange($rule->start_time, $rule->end_time)) {
+                    return [
+                        ...$this->invalidSchedule($unitId, $date, 'special_work_schedule_period'),
+                        'title' => $specialEntry->period->name,
+                    ];
+                }
+
+                return [
+                    ...$resolved,
+                    'title' => $specialEntry->period->name,
+                    'work_schedule_profile_id' => $specialEntry->work_schedule_profile_id,
+                    'special_work_schedule_period_id' => $specialEntry->period->id,
+                ];
+            }
+        }
+
         if ($calendar !== null) {
             if (! $calendar->is_working_day) {
                 return $this->resolveEntry($unitId, $date, 'calendar', $calendar, $calendar);

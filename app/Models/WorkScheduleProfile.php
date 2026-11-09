@@ -17,6 +17,7 @@ class WorkScheduleProfile extends Model
 
     protected $fillable = [
         'work_schedule_category_id',
+        'schedule_type',
         'name',
         'start_time',
         'end_time',
