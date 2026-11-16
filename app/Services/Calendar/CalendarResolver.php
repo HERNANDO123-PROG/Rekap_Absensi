@@ -15,6 +15,18 @@ use Carbon\CarbonImmutable;
 
 class CalendarResolver
 {
+    private array $unitCache = [];
+
+    private array $calendarCache = [];
+
+    private array $specialEntriesCache = [];
+
+    private array $periodsCache = [];
+
+    private array $weeklyScheduleCache = [];
+
+    private array $categoryCache = [];
+
     public function __construct(
         private readonly EmployeeScheduleProfileValidator $scheduleProfileValidator,
     ) {}
@@ -30,7 +42,7 @@ class CalendarResolver
             $employee->loadMissing('workScheduleProfile.rules');
         }
 
-        $unit = Unit::query()->find($unitId);
+        $unit = $this->unitCache[$unitId] ??= Unit::query()->find($unitId);
         $parsedDate = CarbonImmutable::createFromFormat('!Y-m-d', $date);
 
         if ($unit === null || ! in_array($unit->code, ['TK', 'SD'], true)) {
@@ -41,21 +53,29 @@ class CalendarResolver
             throw new \InvalidArgumentException('Date must use YYYY-MM-DD format.');
         }
 
-        $calendar = WorkCalendar::query()
-            ->where('unit_id', $unitId)
-            ->whereDate('date', $date)
-            ->first();
+        $calendarCacheKey = $unitId.':'.$date;
+        if (! array_key_exists($calendarCacheKey, $this->calendarCache)) {
+            $this->calendarCache[$calendarCacheKey] = WorkCalendar::query()
+                ->where('unit_id', $unitId)
+                ->whereDate('date', $date)
+                ->first();
+        }
+        $calendar = $this->calendarCache[$calendarCacheKey];
 
         if ($categoryId !== null) {
-            $specialEntries = SpecialWorkSchedulePeriodCategory::query()
-                ->with(['period', 'profile.rules'])
-                ->where('work_schedule_category_id', $categoryId)
-                ->whereHas('period', function ($query) use ($date): void {
-                    $query->where('is_active', true)
-                        ->whereDate('start_date', '<=', $date)
-                        ->whereDate('end_date', '>=', $date);
-                })
-                ->get();
+            $specialEntriesCacheKey = $categoryId.':'.$date;
+            if (! array_key_exists($specialEntriesCacheKey, $this->specialEntriesCache)) {
+                $this->specialEntriesCache[$specialEntriesCacheKey] = SpecialWorkSchedulePeriodCategory::query()
+                    ->with(['period', 'profile.rules'])
+                    ->where('work_schedule_category_id', $categoryId)
+                    ->whereHas('period', function ($query) use ($date): void {
+                        $query->where('is_active', true)
+                            ->whereDate('start_date', '<=', $date)
+                            ->whereDate('end_date', '>=', $date);
+                    })
+                    ->get();
+            }
+            $specialEntries = $this->specialEntriesCache[$specialEntriesCacheKey];
 
             if ($specialEntries->pluck('period.id')->filter()->unique()->count() > 1) {
                 return [
@@ -171,18 +191,23 @@ class CalendarResolver
             );
         }
 
-        $periods = $categoryId === null
-            ? collect()
-            : WorkSchedulePeriod::query()
-                ->with('profile.rules')
-                ->where('work_schedule_category_id', $categoryId)
-                ->where('is_active', true)
-                ->whereDate('start_date', '<=', $date)
-                ->whereDate('end_date', '>=', $date)
-                ->where(function ($query) use ($unitId): void {
-                    $query->whereNull('unit_id')->orWhere('unit_id', $unitId);
-                })
-                ->get();
+        $periods = collect();
+        if ($categoryId !== null) {
+            $periodsCacheKey = $unitId.':'.$categoryId.':'.$date;
+            if (! array_key_exists($periodsCacheKey, $this->periodsCache)) {
+                $this->periodsCache[$periodsCacheKey] = WorkSchedulePeriod::query()
+                    ->with('profile.rules')
+                    ->where('work_schedule_category_id', $categoryId)
+                    ->where('is_active', true)
+                    ->whereDate('start_date', '<=', $date)
+                    ->whereDate('end_date', '>=', $date)
+                    ->where(function ($query) use ($unitId): void {
+                        $query->whereNull('unit_id')->orWhere('unit_id', $unitId);
+                    })
+                    ->get();
+            }
+            $periods = $this->periodsCache[$periodsCacheKey];
+        }
 
         if ($periods->count() > 1) {
             return [
@@ -234,10 +259,14 @@ class CalendarResolver
             ];
         }
 
-        $weeklySchedule = WorkSchedule::query()
-            ->where('unit_id', $unitId)
-            ->where('day_of_week', $parsedDate->dayOfWeek)
-            ->first();
+        $weeklyScheduleCacheKey = $unitId.':'.$parsedDate->dayOfWeek;
+        if (! array_key_exists($weeklyScheduleCacheKey, $this->weeklyScheduleCache)) {
+            $this->weeklyScheduleCache[$weeklyScheduleCacheKey] = WorkSchedule::query()
+                ->where('unit_id', $unitId)
+                ->where('day_of_week', $parsedDate->dayOfWeek)
+                ->first();
+        }
+        $weeklySchedule = $this->weeklyScheduleCache[$weeklyScheduleCacheKey];
 
         if ($employee !== null && $employee->work_schedule_profile_id !== null && $categoryId === null) {
             return $this->invalidSchedule(
@@ -309,9 +338,13 @@ class CalendarResolver
 
     private function resolveCategory(?int $categoryId): ?WorkScheduleCategory
     {
-        return $categoryId === null
-            ? null
-            : WorkScheduleCategory::query()->with('workScheduleProfile.rules')->find($categoryId);
+        if ($categoryId === null) {
+            return null;
+        }
+
+        return $this->categoryCache[$categoryId] ??= WorkScheduleCategory::query()
+            ->with('workScheduleProfile.rules')
+            ->find($categoryId);
     }
 
     private function categoryUnavailableSchedule(int $unitId, string $date, ?WorkSchedule $weeklySchedule): array

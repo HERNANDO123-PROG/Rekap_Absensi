@@ -46,11 +46,6 @@
     </section>
 
     @if ($report)
-        <section class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950" role="note">
-            <p><strong>Catatan:</strong> angka “Data belum cukup” bernilai null pada mesin hitung dan tidak dianggap nol. “Perkiraan hari kerja” berasal dari inferensi fingerprint; “Acuan jam kerja tidak lengkap” berarti jadwal saat ini dipakai sebagai fallback untuk tanggal lampau.</p>
-            <p class="mt-1">Tanggal belum dapat dipastikan: {{ $report['summary']['unknown_date_count'] }}. Perkiraan hari kerja: {{ $report['summary']['provisional_day_count'] }}. Kasus “Perlu diperiksa” pada pegawai di halaman ini: {{ $report['summary']['page_ambiguous_employee_day_count'] }}.</p>
-        </section>
-
         <section class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <div class="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -94,7 +89,6 @@
                                         <div class="mt-1 flex flex-wrap gap-1">
                                             @if ($row['is_provisional']) <span class="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-900">Perkiraan hari kerja</span> @endif
                                             @if ($row['is_ambiguous']) <span class="rounded bg-rose-100 px-1.5 py-0.5 text-xs text-rose-900">Perlu diperiksa</span> @endif
-                                            @if ($row['history_limited']) <span class="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700">Acuan jam kerja tidak lengkap</span> @endif
                                         </div>
                                     </td>
                                     <td class="px-3 py-3 text-slate-700">{{ $row['category_name'] ?? 'Tidak tersedia' }}</td>

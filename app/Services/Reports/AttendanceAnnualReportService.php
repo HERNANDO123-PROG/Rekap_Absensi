@@ -2,9 +2,13 @@
 
 namespace App\Services\Reports;
 
+use App\Data\Reports\AttendanceFingerprintPeriodReportFilters;
 use App\Enums\AttendanceStatus;
+use App\Enums\ImportBatchStatus;
+use App\Enums\MatchingStatus;
 use App\Models\AttendanceRecord;
 use App\Models\Employee;
+use App\Models\FingerprintLog;
 use Carbon\CarbonImmutable;
 
 class AttendanceAnnualReportService
@@ -24,7 +28,10 @@ class AttendanceAnnualReportService
         'December' => 12,
     ];
 
-    public function __construct(private readonly AttendanceRecapCalculator $recapCalculator) {}
+    public function __construct(
+        private readonly AttendanceRecapCalculator $recapCalculator,
+        private readonly AttendanceFingerprintPeriodReportService $fingerprintReport,
+    ) {}
 
     public function generate(int $unitId, int $year, ?array $employeeIds = null): array
     {
@@ -83,6 +90,70 @@ class AttendanceAnnualReportService
                 'annual' => $annual,
                 'monthly' => $monthly,
             ];
+        }
+
+        $rowsByEmployee = collect($data)->keyBy('employee_id');
+        $employeesNeedingFingerprintRecap = $employees
+            ->filter(function (Employee $employee) use ($rowsByEmployee): bool {
+                $row = $rowsByEmployee->get($employee->id);
+
+                return $row !== null && collect([
+                    'hadir',
+                    'terlambat',
+                    'pulang_awal',
+                    'total_finger',
+                ])->every(fn (string $metric) => $row['annual'][$metric] === 0);
+            })
+            ->modelKeys();
+
+        if ($employeesNeedingFingerprintRecap !== [] && FingerprintLog::query()
+            ->where('unit_id', $unitId)
+            ->whereIn('employee_id', $employeesNeedingFingerprintRecap)
+            ->whereBetween('attendance_date', [$year.'-01-01', $year.'-12-31'])
+            ->where('matching_status', MatchingStatus::Matched->value)
+            ->whereHas('importBatch', fn ($query) => $query
+                ->where('unit_id', $unitId)
+                ->where('status', ImportBatchStatus::Completed->value))
+            ->exists()) {
+            $fingerprintReport = $this->fingerprintReport->generate(
+                AttendanceFingerprintPeriodReportFilters::fromValidated([
+                    'unit_id' => $unitId,
+                    'start_date' => $year.'-01-01',
+                    'end_date' => $year.'-12-31',
+                    'page' => 1,
+                    'per_page' => count($employeesNeedingFingerprintRecap),
+                ]),
+                $employeesNeedingFingerprintRecap,
+            );
+            $fingerprintRows = collect($fingerprintReport['data'])->keyBy('employee_id');
+
+            foreach ($data as &$row) {
+                $fingerprintRow = $fingerprintRows->get($row['employee_id']);
+                if ($fingerprintRow === null) {
+                    continue;
+                }
+
+                $daysByMonth = collect($fingerprintRow['daily'])
+                    ->groupBy(fn (array $day) => CarbonImmutable::parse($day['date'])->format('F'));
+
+                foreach (array_keys(self::MONTHS) as $month) {
+                    $days = $daysByMonth->get($month, collect());
+                    foreach (['hari_kerja', 'hadir', 'terlambat', 'pulang_awal', 'total_finger'] as $metric) {
+                        $values = $days->map(fn (array $day) => $day['metrics'][$metric])->all();
+                        $row['monthly'][$month][$metric] = in_array(null, $values, true)
+                            ? null
+                            : array_sum($values);
+                    }
+                }
+
+                foreach (['hari_kerja', 'hadir', 'terlambat', 'pulang_awal', 'total_finger'] as $metric) {
+                    $values = array_column($row['monthly'], $metric);
+                    $row['annual'][$metric] = in_array(null, $values, true)
+                        ? null
+                        : array_sum($values);
+                }
+            }
+            unset($row);
         }
 
         return ['data' => $data];

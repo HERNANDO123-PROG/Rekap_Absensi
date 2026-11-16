@@ -24,10 +24,12 @@ class FoundationTest extends TestCase
         $this->actingAs($user)
             ->get('/dashboard')
             ->assertOk()
-            ->assertSee('Fondasi absensi siap.');
+            ->assertSee('Khazanah Ilmu')
+            ->assertSee('images/logo.png')
+            ->assertDontSee('Fondasi absensi siap.');
 
         Livewire::actingAs($user)
             ->test(Dashboard::class)
-            ->assertSee('Fondasi absensi siap.');
+            ->assertDontSee('Fondasi absensi siap.');
     }
 }

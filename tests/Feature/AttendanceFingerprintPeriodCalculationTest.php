@@ -78,6 +78,30 @@ class AttendanceFingerprintPeriodCalculationTest extends TestCase
         $this->assertSame(1, $row['tidak_hadir']);
     }
 
+    public function test_schedule_resolution_is_reused_for_employees_with_the_same_schedule(): void
+    {
+        $unit = $this->unit();
+        $this->employee($unit, 'First');
+        $this->employee($unit, 'Second');
+        $workCalendarQueries = 0;
+        DB::listen(function ($query) use (&$workCalendarQueries): void {
+            if (str_contains($query->sql, 'work_calendars')) {
+                $workCalendarQueries++;
+            }
+        });
+
+        $report = app(AttendanceFingerprintPeriodReportService::class)->generate(
+            AttendanceFingerprintPeriodReportFilters::fromValidated([
+                'unit_id' => $unit->id,
+                'start_date' => '2026-09-01',
+                'end_date' => '2026-09-02',
+            ]),
+        );
+
+        $this->assertCount(2, $report['data']);
+        $this->assertSame(3, $workCalendarQueries);
+    }
+
     public function test_collective_inference_uses_more_than_half_of_unique_unit_employees(): void
     {
         $unit = $this->unit();
@@ -319,6 +343,35 @@ class AttendanceFingerprintPeriodCalculationTest extends TestCase
         $this->assertSame(0, $row['hari_kerja']);
     }
 
+    public function test_routine_holiday_fingerprints_are_not_flagged_for_missing_work_schedule(): void
+    {
+        $unit = $this->unit();
+        $employee = $this->employee($unit, 'Routine holiday');
+        $this->logs($unit, $employee, '2026-10-04', ['07:00', '15:00']);
+        $this->logs($unit, $employee, '2026-10-31', ['07:00', '15:00']);
+
+        $result = app(AttendanceFingerprintPeriodReportService::class)->generate(
+            AttendanceFingerprintPeriodReportFilters::fromValidated([
+                'unit_id' => $unit->id,
+                'start_date' => '2026-10-04',
+                'end_date' => '2026-10-31',
+            ]),
+        );
+        $days = collect($result['data'][0]['daily'])->keyBy('date');
+
+        foreach (['2026-10-04', '2026-10-31'] as $date) {
+            $day = $days->get($date);
+
+            $this->assertSame('non_working', $day['day_status']);
+            $this->assertSame('routine_schedule', $day['source']);
+            $this->assertSame(2, $day['raw_log_count']);
+            $this->assertSame('non_working_day', $day['candidate_status']);
+            $this->assertFalse($day['is_ambiguous']);
+            $this->assertSame(0, $day['metrics']['total_finger']);
+            $this->assertSame(0, $day['metrics']['hadir']);
+        }
+    }
+
     public function test_unverifiable_duty_is_not_used_as_attendance_or_absence_exemption(): void
     {
         $unit = $this->unit();
@@ -538,6 +591,43 @@ class AttendanceFingerprintPeriodCalculationTest extends TestCase
         $this->assertSame(1, $exitDay['metrics']['izin_keluar']);
         $this->assertSame(0, $exitDay['metrics']['tidak_hadir']);
         $this->assertFalse($exitDay['is_ambiguous']);
+    }
+
+    public function test_identical_imported_leave_rows_are_counted_once_without_conflict(): void
+    {
+        $unit = $this->unit();
+        $employee = $this->employee($unit, 'Duplicate imported duty');
+        $this->calendar($unit, '2026-09-01', true, '07:00', '15:00');
+        $batch = LeaveImportBatch::query()->create([
+            'unit_id' => $unit->id,
+            'filename' => 'duplicate-leave.xlsx',
+            'file_hash' => hash('sha256', 'duplicate-leave-import'),
+            'status' => ImportBatchStatus::Completed,
+            'total_rows' => 2,
+            'success_rows' => 2,
+        ]);
+        foreach (range(1, 2) as $index) {
+            LeaveRequest::query()->create([
+                'import_batch_id' => $batch->id,
+                'source' => 'import',
+                'unit_id' => $unit->id,
+                'employee_id' => $employee->id,
+                'raw_name' => $employee->nama_lengkap,
+                'normalized_name' => strtolower($employee->nama_lengkap),
+                'request_date' => '2026-09-01',
+                'request_time' => '00:00:00',
+                'leave_type' => LeaveType::OfficialDuty,
+                'raw_leave_type' => LeaveType::OfficialDuty->value,
+                'description' => 'Kegiatan resmi.',
+                'matching_status' => MatchingStatus::Matched,
+            ]);
+        }
+
+        $day = $this->report($unit)['data'][0]['daily'][0];
+
+        $this->assertSame('verified', $day['leave_status']);
+        $this->assertSame(1, $day['metrics']['dinas']);
+        $this->assertFalse($day['is_ambiguous']);
     }
 
     public function test_unmatched_or_incomplete_batch_logs_are_not_used_for_inference(): void

@@ -445,6 +445,40 @@ class LeaveImportTest extends TestCase
         $this->assertSame(3, $batch->processing_summary['created']);
     }
 
+    public function test_identical_leave_rows_are_warned_in_preview_and_preserved_on_import(): void
+    {
+        $unit = $this->createUnit('TK');
+        $employee = $this->createEmployee($unit, 'Duplicate duty');
+        $employee->update(['nip' => '000123']);
+        $row = $this->validRow(
+            'Duplicate duty',
+            'Perjalanan Dinas/Tugas Resmi',
+            'Kegiatan resmi.',
+            '00.00',
+            '',
+            '2026-08-03',
+        );
+        $file = $this->createFixture('xlsx', [$row, $row]);
+        $this->actingAsHrdUser();
+
+        $this->postJson('/leave-imports/preview', [
+            'unit_id' => $unit->id,
+            'file' => $this->uploadedFile($file),
+        ])->assertOk()
+            ->assertJsonPath('data.duplicate_rows', 1)
+            ->assertJsonPath('data.preview_rows.1.duplicate_of', 2)
+            ->assertJsonPath('data.valid_rows', 2)
+            ->assertJsonPath('data.warnings.0', 'Ditemukan 1 baris izin duplikat identik. Semua baris tetap disimpan, tetapi rekap menghitungnya satu kali.');
+
+        $this->postJson('/leave-imports', [
+            'unit_id' => $unit->id,
+            'file' => $this->uploadedFile($file),
+        ])->assertCreated()
+            ->assertJsonPath('summary.imported_rows', 2);
+
+        $this->assertDatabaseCount('leave_requests', 2);
+    }
+
     public function test_fatal_request_insert_rolls_back_all_requests_and_batch_is_failed(): void
     {
         $unit = $this->createUnit('TK');

@@ -20,6 +20,7 @@ use App\Models\WorkSchedule;
 use App\Models\WorkScheduleCategory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use Tests\TestCase;
 
@@ -87,7 +88,31 @@ class FingerprintPeriodIntegrationTest extends TestCase
             ]));
     }
 
-    public function test_period_table_explains_provisional_ambiguous_and_null_results(): void
+    public function test_period_filters_are_restored_after_navigating_away_and_back(): void
+    {
+        $unit = $this->unit('TK');
+        $this->employee($unit, 'Ayu Person', 'NIP-AYU');
+        $this->actingAs(User::factory()->create());
+
+        Livewire::test(PeriodReport::class)
+            ->set('unitId', (string) $unit->id)
+            ->set('startDate', '2026-09-01')
+            ->set('endDate', '2026-09-30')
+            ->set('search', 'NIP-AYU')
+            ->call('applyFilters')
+            ->assertSet('unitId', (string) $unit->id);
+
+        $this->get('/work-calendar')->assertOk();
+
+        Livewire::test(PeriodReport::class)
+            ->assertSet('unitId', (string) $unit->id)
+            ->assertSet('startDate', '2026-09-01')
+            ->assertSet('endDate', '2026-09-30')
+            ->assertSet('search', 'NIP-AYU')
+            ->assertSee('Ayu Person');
+    }
+
+    public function test_period_table_shows_result_statuses_without_internal_notes(): void
     {
         $unit = $this->unit('TK');
         $employee = $this->employee($unit, 'Provisional Person', 'NIP-PROVISIONAL');
@@ -103,7 +128,8 @@ class FingerprintPeriodIntegrationTest extends TestCase
             ->assertSee('Perkiraan hari kerja')
             ->assertSee('Perlu diperiksa')
             ->assertSee('Data belum cukup')
-            ->assertSee('Tanggal belum dapat dipastikan: 0')
+            ->assertDontSee('Catatan:')
+            ->assertDontSee('Acuan jam kerja tidak lengkap')
             ->assertDontSee('Tanggal unknown');
     }
 
@@ -145,19 +171,22 @@ class FingerprintPeriodIntegrationTest extends TestCase
             ->assertSee('Detail Person')
             ->assertSee('Hari kerja')
             ->assertSee('Jadwal rutin')
+            ->assertSee('Tampilkan detail teknis')
+            ->assertSee('Sumber status')
             ->assertSee('07:00')
             ->assertSee('15:00')
             ->assertSee('07:10')
             ->assertSee('14:55')
-            ->assertSee('Kandidat masuk dan pulang dipilih')
-            ->assertSee('selected')
+            ->assertSee('Dipilih')
+            ->assertDontSee('selected')
             ->assertSee('Persetujuan')
             ->assertSee('Menunggu konfirmasi')
             ->assertSee('Verifikasi')
-            ->assertSee('Acuan jam kerja tidak lengkap')
-            ->assertSee('Izin belum terverifikasi')
+            ->assertDontSee('Acuan jam kerja tidak lengkap')
+            ->assertDontSee('Nilai “Data belum cukup” tetap kosong')
+            ->assertSee('Belum terverifikasi')
             ->assertSee('Izin belum terverifikasi karena cakupan atau persetujuannya tidak dapat dipastikan dari data yang tersedia.')
-            ->assertSee('unverifiable')
+            ->assertDontSee('unverifiable')
             ->assertDontSee('Cakupan atau persetujuan izin tidak dapat diverifikasi');
     }
 
@@ -220,15 +249,33 @@ class FingerprintPeriodIntegrationTest extends TestCase
             $summary = $spreadsheet->getSheetByName('Rekap Pegawai');
             $daily = $spreadsheet->getSheetByName('Rincian Harian');
 
-            $this->assertSame('Belum dapat ditentukan', $summary->getCell('F7')->getValue());
-            $this->assertSame($employees[100]->id, $summary->getCell('B107')->getValue());
-            $this->assertSame(107, $summary->getHighestRow());
-            $this->assertSame(102, $daily->getHighestRow());
-            $this->assertSame('Belum dapat ditentukan', $daily->getCell('R2')->getValue());
-            $this->assertSame('Status Persetujuan', $daily->getCell('AA1')->getValue());
-            $this->assertSame('Status Verifikasi', $daily->getCell('AB1')->getValue());
-            $this->assertSame('Alasan/Peringatan', $daily->getCell('AC1')->getValue());
-            $this->assertNotSame($excluded->id, $summary->getCell('B107')->getValue());
+            $this->assertSame('RINGKASAN REKAP ABSENSI', $summary->getCell('A1')->getValue());
+            $this->assertSame('IDENTITAS PEGAWAI', $summary->getCell('A6')->getValue());
+            $this->assertSame('KEHADIRAN', $summary->getCell('F6')->getValue());
+            $this->assertSame('KETIDAKHADIRAN', $summary->getCell('K6')->getValue());
+            $this->assertSame('Nama Pegawai', $summary->getCell('C7')->getValue());
+            $this->assertSame('Total Finger', $summary->getCell('J7')->getValue());
+            $this->assertSame('Dinas', $summary->getCell('M7')->getValue());
+            $this->assertSame('M', $summary->getHighestColumn());
+            $this->assertSame('Belum dapat ditentukan', $summary->getCell('F8')->getValue());
+            $this->assertSame($employees[100]->id, $summary->getCell('B108')->getValue());
+            $this->assertSame('TOTAL', $summary->getCell('A109')->getValue());
+            $this->assertSame(109, $summary->getHighestRow());
+            $this->assertSame('D8', $summary->getFreezePane());
+            $this->assertSame('A7:M108', $summary->getAutoFilter()->getRange());
+            $this->assertFalse($summary->getShowGridlines());
+            $this->assertSame('@', $summary->getStyle('D8')->getNumberFormat()->getFormatCode());
+            $this->assertSame(DataType::TYPE_STRING, $summary->getCell('D8')->getDataType());
+            $this->assertSame(108, $daily->getHighestRow());
+            $this->assertSame('01-09-2026', $daily->getCell('B8')->getValue());
+            $this->assertSame('Belum diketahui', $daily->getCell('F8')->getValue());
+            $this->assertSame('-', $daily->getCell('G8')->getValue());
+            $this->assertSame('Persetujuan', $daily->getCell('P7')->getValue());
+            $this->assertSame('Catatan', $daily->getCell('Q7')->getValue());
+            $this->assertSame('Q', $daily->getHighestColumn());
+            $this->assertSame('D8', $daily->getFreezePane());
+            $this->assertSame('A7:Q108', $daily->getAutoFilter()->getRange());
+            $this->assertNotSame($excluded->id, $summary->getCell('B108')->getValue());
         } finally {
             unlink($path);
         }

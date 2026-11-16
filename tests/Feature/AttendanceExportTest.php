@@ -147,8 +147,8 @@ class AttendanceExportTest extends TestCase
         $annual = app(AttendanceAnnualExportService::class)
             ->buildSpreadsheet($unit->id, 2026)
             ->getActiveSheet();
-        $this->assertSame(DataType::TYPE_STRING, $annual->getCell('C6')->getDataType());
-        $this->assertSame(DataType::TYPE_STRING, $annual->getCell('D6')->getDataType());
+        $this->assertSame(DataType::TYPE_STRING, $annual->getCell('C7')->getDataType());
+        $this->assertSame(DataType::TYPE_STRING, $annual->getCell('E7')->getDataType());
 
         $detail = app(EmployeeAttendanceDetailExportService::class)
             ->buildSpreadsheet($employee, '2026-08-01', '2026-08-31')
@@ -257,50 +257,69 @@ class AttendanceExportTest extends TestCase
         $sheet = $spreadsheet->getActiveSheet();
         $this->assertSame('Rekap Tahunan', $sheet->getTitle());
         $this->assertSame([
-            'No', 'ID Pegawai', 'Nama', 'Jabatan', 'Metric', 'Jan', 'Feb', 'Mar', 'Apr',
-            'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des', 'Total',
-        ], $this->rowValues($sheet, 'A5', 'R5'));
-        $this->assertSame($employee->id, $sheet->getCell('B6')->getValue());
-        $this->assertSame(['Hari Kerja', 'Hadir', 'Terlambat', 'Pulang Awal', 'Total Finger'], [
-            $sheet->getCell('E6')->getValue(),
-            $sheet->getCell('E7')->getValue(),
-            $sheet->getCell('E8')->getValue(),
-            $sheet->getCell('E9')->getValue(),
-            $sheet->getCell('E10')->getValue(),
-        ]);
-        $this->assertSame(26, $sheet->getCell('N6')->getValue());
-        $this->assertSame(1, $sheet->getCell('N7')->getValue());
-        $this->assertSame(1, $sheet->getCell('N8')->getValue());
-        $this->assertSame(1, $sheet->getCell('N9')->getValue());
-        $this->assertSame(2, $sheet->getCell('N10')->getValue());
-        foreach ([
-            'hari_kerja' => 6,
-            'hadir' => 7,
-            'terlambat' => 8,
-            'pulang_awal' => 9,
-            'total_finger' => 10,
-        ] as $metric => $row) {
-            $monthColumns = [
-                'January' => 'F', 'February' => 'G', 'March' => 'H', 'April' => 'I',
-                'May' => 'J', 'June' => 'K', 'July' => 'L', 'August' => 'M',
-                'September' => 'N', 'October' => 'O', 'November' => 'P', 'December' => 'Q',
-            ];
-            foreach ($monthColumns as $month => $column) {
+            'No', 'ID Pegawai', 'Nama Pegawai', 'NIP', 'Jabatan', 'Hari Kerja', 'Hadir',
+            'Terlambat', 'Pulang Awal', 'Total Finger', 'Tidak Hadir', 'Izin', 'Sakit',
+            'Dinas', 'Izin Keluar',
+        ], $this->rowValues($sheet, 'A6', 'O6'));
+        $this->assertSame('IDENTITAS PEGAWAI', $sheet->getCell('A5')->getValue());
+        $this->assertSame('KEHADIRAN', $sheet->getCell('F5')->getValue());
+        $this->assertSame('KETIDAKHADIRAN', $sheet->getCell('K5')->getValue());
+        $this->assertSame($employee->id, $sheet->getCell('B7')->getValue());
+        $this->assertSame('Budi', $sheet->getCell('C7')->getValue());
+        $this->assertSame('', $sheet->getCell('D7')->getValue());
+        $this->assertSame(DataType::TYPE_STRING, $sheet->getCell('D7')->getDataType());
+        $this->assertSame('@', $sheet->getStyle('D7')->getNumberFormat()->getFormatCode());
+        $this->assertSame($serviceRow['annual']['hari_kerja'], $sheet->getCell('F7')->getValue());
+        $this->assertSame($serviceRow['annual']['total_finger'], $sheet->getCell('J7')->getValue());
+        $this->assertSame(2, $spreadsheet->getSheetCount());
+        $this->assertSame(8, $sheet->getHighestRow());
+        $this->assertSame(2026, $sheet->getCell('D2')->getValue());
+        $this->assertSame('TOTAL', $sheet->getCell('A8')->getValue());
+        $this->assertSame('=SUM(F7:F7)', $sheet->getCell('F8')->getValue());
+        $this->assertSame('D7', $sheet->getFreezePane());
+        $this->assertFalse($sheet->getShowGridlines());
+        $this->assertSame('A6:O7', $sheet->getAutoFilter()->getRange());
+
+        $monthlySheet = $spreadsheet->getSheetByName('Rincian Bulanan');
+        $this->assertNotNull($monthlySheet);
+        $this->assertSame([
+            'No', 'ID Pegawai', 'Nama Pegawai', 'NIP', 'Jabatan', 'Bulan', 'Hari Kerja',
+            'Hadir', 'Terlambat', 'Pulang Awal', 'Total Finger', 'Tidak Hadir', 'Izin',
+            'Sakit', 'Dinas', 'Izin Keluar',
+        ], $this->rowValues($monthlySheet, 'A6', 'P6'));
+        $this->assertSame('IDENTITAS PEGAWAI', $monthlySheet->getCell('A5')->getValue());
+        $this->assertSame('PERIODE', $monthlySheet->getCell('F5')->getValue());
+        $this->assertSame('KEHADIRAN', $monthlySheet->getCell('G5')->getValue());
+        $this->assertSame('KETIDAKHADIRAN', $monthlySheet->getCell('L5')->getValue());
+        $monthLabels = [
+            'January' => 'Januari', 'February' => 'Februari', 'March' => 'Maret',
+            'April' => 'April', 'May' => 'Mei', 'June' => 'Juni', 'July' => 'Juli',
+            'August' => 'Agustus', 'September' => 'September', 'October' => 'Oktober',
+            'November' => 'November', 'December' => 'Desember',
+        ];
+        $monthlyColumns = [
+            'hari_kerja' => 'G', 'hadir' => 'H', 'terlambat' => 'I',
+            'pulang_awal' => 'J', 'total_finger' => 'K', 'alpha' => 'L',
+            'izin' => 'M', 'sakit' => 'N', 'dinas' => 'O',
+            'izin_keluar' => 'P',
+        ];
+        foreach (array_keys($monthLabels) as $index => $month) {
+            $row = $index + 7;
+            $this->assertSame($monthLabels[$month], $monthlySheet->getCell('F'.$row)->getValue());
+            foreach ($monthlyColumns as $metric => $column) {
                 $this->assertSame(
                     $serviceRow['monthly'][$month][$metric],
-                    $sheet->getCell($column.$row)->getValue(),
+                    $monthlySheet->getCell($column.$row)->getValue(),
                     $month.' '.$metric.' must match the annual report service.',
                 );
             }
-            $this->assertSame($serviceRow['annual'][$metric], $sheet->getCell('R'.$row)->getValue());
         }
-        $this->assertSame(313, $sheet->getCell('R6')->getValue());
-        $this->assertSame(2, $sheet->getCell('R7')->getValue());
-        $this->assertSame(1, $sheet->getCell('R8')->getValue());
-        $this->assertSame(1, $sheet->getCell('R9')->getValue());
-        $this->assertSame(4, $sheet->getCell('R10')->getValue());
-        $this->assertSame(10, $sheet->getHighestRow());
-        $this->assertSame(2026, $sheet->getCell('B2')->getValue());
+        $this->assertSame(19, $monthlySheet->getHighestRow());
+        $this->assertSame('P', $monthlySheet->getHighestColumn());
+        $this->assertSame('TOTAL', $monthlySheet->getCell('A19')->getValue());
+        $this->assertSame('D7', $monthlySheet->getFreezePane());
+        $this->assertFalse($monthlySheet->getShowGridlines());
+        $this->assertSame('A6:P18', $monthlySheet->getAutoFilter()->getRange());
 
         unlink($tmp);
     }

@@ -12,6 +12,8 @@ use Livewire\Component;
 
 class PeriodReport extends Component
 {
+    private const FILTER_SESSION_KEY = 'reports.fingerprint_period.filters';
+
     public string $unitId = '';
 
     public string $startDate;
@@ -26,12 +28,17 @@ class PeriodReport extends Component
 
     public function mount(): void
     {
-        $this->unitId = (string) request()->query('unit_id', '');
-        $this->startDate = (string) request()->query('start_date', now()->startOfMonth()->toDateString());
-        $this->endDate = (string) request()->query('end_date', now()->endOfMonth()->toDateString());
-        $this->categoryId = (string) request()->query('category_id', '');
-        $this->search = (string) request()->query('search', '');
-        $this->page = max(1, (int) request()->query('page', 1));
+        $filters = array_merge(
+            session()->get(self::FILTER_SESSION_KEY, []),
+            request()->query(),
+        );
+
+        $this->unitId = (string) ($filters['unit_id'] ?? '');
+        $this->startDate = (string) ($filters['start_date'] ?? now()->startOfMonth()->toDateString());
+        $this->endDate = (string) ($filters['end_date'] ?? now()->endOfMonth()->toDateString());
+        $this->categoryId = (string) ($filters['category_id'] ?? '');
+        $this->search = (string) ($filters['search'] ?? '');
+        $this->page = max(1, (int) ($filters['page'] ?? 1));
     }
 
     public function applyFilters(): void
@@ -46,21 +53,25 @@ class PeriodReport extends Component
             'search' => ['nullable', 'string'],
         ]);
         $this->page = 1;
+        $this->rememberFilters();
     }
 
     public function updatedSearch(): void
     {
         $this->page = 1;
+        $this->rememberFilters();
     }
 
     public function previousPage(): void
     {
         $this->page = max(1, $this->page - 1);
+        $this->rememberFilters();
     }
 
     public function nextPage(int $lastPage): void
     {
         $this->page = min($lastPage, $this->page + 1);
+        $this->rememberFilters();
     }
 
     public function render(): View
@@ -100,6 +111,18 @@ class PeriodReport extends Component
     private function rules(): array
     {
         return app(AttendanceFingerprintPeriodReportRequest::class)->rules();
+    }
+
+    private function rememberFilters(): void
+    {
+        session()->put(self::FILTER_SESSION_KEY, [
+            'unit_id' => $this->unitId,
+            'start_date' => $this->startDate,
+            'end_date' => $this->endDate,
+            'category_id' => $this->categoryId,
+            'search' => $this->search,
+            'page' => $this->page,
+        ]);
     }
 
     private function filtersAreValid(): bool

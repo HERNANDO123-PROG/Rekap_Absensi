@@ -2,11 +2,13 @@
 
 namespace App\Livewire;
 
+use App\Data\Reports\AttendanceFingerprintPeriodReportFilters;
 use App\Enums\AttendanceStatus;
 use App\Enums\EmployeeStatus;
 use App\Models\AttendanceRecord;
 use App\Models\Employee;
 use App\Models\Unit;
+use App\Services\Reports\AttendanceFingerprintPeriodReportService;
 use Livewire\Component;
 
 class Dashboard extends Component
@@ -16,13 +18,14 @@ class Dashboard extends Component
         $selectedUnitId = request()->query('unit_id', 'all');
         $selectedDate = request()->query('date', now()->toDateString());
 
-        $query = AttendanceRecord::query()->whereDate('attendance_date', $selectedDate);
-
-        if ($selectedUnitId !== 'all' && ! empty($selectedUnitId)) {
-            $query->where('unit_id', $selectedUnitId);
-        }
-
         $units = Unit::query()->orderBy('name')->get();
+        $attendanceRecords = AttendanceRecord::query()
+            ->whereDate('attendance_date', $selectedDate)
+            ->when(
+                $selectedUnitId !== 'all' && ! empty($selectedUnitId),
+                fn ($query) => $query->where('unit_id', $selectedUnitId),
+            )
+            ->get();
 
         $totalEmployees = Employee::query()
             ->when($selectedUnitId !== 'all' && ! empty($selectedUnitId), fn ($q) => $q->where('unit_id', $selectedUnitId))
@@ -31,14 +34,49 @@ class Dashboard extends Component
 
         $stats = [
             'totalEmployees' => $totalEmployees,
-            'hadir' => (clone $query)->where('status', AttendanceStatus::Present->value)->count(),
-            'terlambat' => (clone $query)->where('status', AttendanceStatus::Late->value)->count(),
-            'izin' => (clone $query)->where('status', AttendanceStatus::Permission->value)->count(),
-            'sakit' => (clone $query)->where('status', AttendanceStatus::Sick->value)->count(),
-            'dinas' => (clone $query)->where('status', AttendanceStatus::OfficialDuty->value)->count(),
-            'alpha' => (clone $query)->where('status', AttendanceStatus::Absent->value)->count(),
-            'perlu_verifikasi' => (clone $query)->where('status', AttendanceStatus::NeedsVerification->value)->count(),
+            'hadir' => 0,
+            'terlambat' => 0,
+            'izin' => 0,
+            'sakit' => 0,
+            'dinas' => 0,
+            'alpha' => 0,
         ];
+
+        foreach ($attendanceRecords as $record) {
+            match ($record->status) {
+                AttendanceStatus::Permission => $stats['izin']++,
+                AttendanceStatus::Sick => $stats['sakit']++,
+                AttendanceStatus::OfficialDuty => $stats['dinas']++,
+                AttendanceStatus::Absent => $stats['alpha']++,
+                default => null,
+            };
+        }
+
+        $unitIds = $selectedUnitId === 'all' || empty($selectedUnitId)
+            ? $units->modelKeys()
+            : [(int) $selectedUnitId];
+        $periodReport = app(AttendanceFingerprintPeriodReportService::class);
+
+        foreach ($unitIds as $unitId) {
+            $employeeCount = Employee::query()->where('unit_id', $unitId)->count();
+            if ($employeeCount === 0) {
+                continue;
+            }
+
+            $report = $periodReport->generate(AttendanceFingerprintPeriodReportFilters::fromValidated([
+                'unit_id' => $unitId,
+                'start_date' => $selectedDate,
+                'end_date' => $selectedDate,
+                'page' => 1,
+                'per_page' => $employeeCount,
+            ]));
+
+            foreach ($report['data'] as $employee) {
+                $metrics = $employee['daily'][0]['metrics'];
+                $stats['hadir'] += (int) ($metrics['hadir'] ?? 0);
+                $stats['terlambat'] += (int) ($metrics['terlambat'] ?? 0);
+            }
+        }
 
         $selectedUnitName = 'Semua Unit';
         if ($selectedUnitId !== 'all' && ! empty($selectedUnitId)) {

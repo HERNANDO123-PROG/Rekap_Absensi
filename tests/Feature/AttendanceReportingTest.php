@@ -66,6 +66,22 @@ class AttendanceReportingTest extends TestCase
             ->assertJsonPath('data.0.employee_id', $sdEmployee->id);
     }
 
+    public function test_dashboard_counts_fingerprint_attendance_for_all_employees_on_selected_date(): void
+    {
+        $unit = $this->createUnit('TK');
+        $firstEmployee = $this->createEmployee($unit, 'TK-001', 'A');
+        $secondEmployee = $this->createEmployee($unit, 'TK-002', 'B');
+        $this->createEmployee($unit, 'TK-003', 'C');
+        $this->createRawFingerprintLogs($firstEmployee, '2026-08-17', ['07:20', '15:40']);
+        $this->createRawFingerprintLogs($secondEmployee, '2026-08-17', ['07:25', '15:40']);
+
+        $this->actingAs(User::factory()->create())
+            ->get('/dashboard?unit_id='.$unit->id.'&date=2026-08-17')
+            ->assertOk()
+            ->assertSeeTextInOrder(['Hadir', '2'])
+            ->assertDontSee('Perlu Verifikasi');
+    }
+
     public function test_period_recap_aggregates_26_complete_workdays_to_52_endpoints(): void
     {
         $employee = $this->createSeptemberEmployee('Complete employee');
@@ -282,6 +298,41 @@ class AttendanceReportingTest extends TestCase
         $this->assertSame($employee->id, $response->json('data.0.employee_id'));
         $this->assertArrayNotHasKey('effective_from', $response->json('data.0'));
         $this->assertArrayNotHasKey('effective_until', $response->json('data.0'));
+    }
+
+    public function test_annual_report_uses_fingerprint_logs_when_attendance_records_have_no_recap_metrics(): void
+    {
+        $unit = $this->createUnit('TK');
+        $employee = $this->createEmployee($unit, 'ANNUAL-FINGERPRINT', 'Fingerprint only');
+        $this->createAttendanceRecord($employee, '2026-09-01', AttendanceStatus::NeedsVerification, null, null, 0, 0);
+
+        for (
+            $date = CarbonImmutable::create(2026, 1, 1);
+            $date <= CarbonImmutable::create(2026, 12, 31);
+            $date = $date->addDay()
+        ) {
+            if ($date->dayOfWeekIso >= 6) {
+                continue;
+            }
+
+            WorkCalendar::query()->create([
+                'unit_id' => $unit->id,
+                'date' => $date->toDateString(),
+                'type' => WorkCalendarType::Workday,
+                'is_working_day' => true,
+                'start_time' => '07:00',
+                'end_time' => '15:40',
+            ]);
+        }
+        $this->createRawFingerprintLogs($employee, '2026-09-01', ['07:00', '15:40']);
+
+        $row = app(\App\Services\Reports\AttendanceAnnualReportService::class)
+            ->generate($unit->id, 2026, [$employee->id])['data'][0];
+
+        $this->assertSame(1, $row['monthly']['September']['hadir']);
+        $this->assertSame(2, $row['monthly']['September']['total_finger']);
+        $this->assertSame(1, $row['annual']['hadir']);
+        $this->assertSame(2, $row['annual']['total_finger']);
     }
 
     public function test_annual_report_monthly_metrics_use_daily_calculator_and_keep_legacy_status_totals(): void

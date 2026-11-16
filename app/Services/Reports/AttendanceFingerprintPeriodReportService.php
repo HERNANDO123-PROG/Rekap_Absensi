@@ -20,14 +20,18 @@ use App\Models\WorkSchedule;
 use App\Models\WorkSchedulePeriod;
 use App\Models\WorkScheduleProfileRule;
 use App\Services\Attendance\AttendanceDateResolver;
+use App\Services\Attendance\AttendanceLeaveResolver;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
 class AttendanceFingerprintPeriodReportService
 {
-    public function __construct(private readonly AttendanceDateResolver $dateResolver) {}
+    public function __construct(
+        private readonly AttendanceDateResolver $dateResolver,
+        private readonly AttendanceLeaveResolver $leaveResolver,
+    ) {}
 
-    public function generate(AttendanceFingerprintPeriodReportFilters $filters): array
+    public function generate(AttendanceFingerprintPeriodReportFilters $filters, ?array $employeeIds = null): array
     {
         $allUnitEmployees = Employee::query()
             ->where('unit_id', $filters->unitId)
@@ -41,6 +45,7 @@ class AttendanceFingerprintPeriodReportService
                 $filters->employeeId !== null,
                 fn ($query) => $query->whereKey($filters->employeeId),
             )
+            ->when($employeeIds !== null, fn ($query) => $query->whereIn('id', $employeeIds))
             ->when(
                 $filters->categoryId !== null,
                 fn ($query) => $query->where('category_id', $filters->categoryId),
@@ -139,9 +144,8 @@ class AttendanceFingerprintPeriodReportService
 
             $denominator = $allUnitEmployees->count();
             $uniqueScanned = $logsByDate->get($date, collect())
-                ->pluck('employee_id')
+                ->keys()
                 ->filter()
-                ->unique()
                 ->count();
             $status = $denominator > 0 && $uniqueScanned / $denominator > 0.5
                 ? 'working'
@@ -159,6 +163,7 @@ class AttendanceFingerprintPeriodReportService
             }
         }
 
+        $scheduleCache = [];
         $rows = $employees->getCollection()
             ->map(function (Employee $employee) use (
                 $dates,
@@ -170,6 +175,7 @@ class AttendanceFingerprintPeriodReportService
                 $weeklyByDay,
                 $schedulePeriods,
                 $filters,
+                &$scheduleCache,
             ): array {
                 $daily = [];
 
@@ -210,11 +216,12 @@ class AttendanceFingerprintPeriodReportService
                         }
                     }
                     $logs = $logsByDate->get($date, collect())
-                        ->where('employee_id', $employee->id)
+                        ->get($employee->id, collect())
                         ->values();
                     $leaveRequests = $leavesByEmployeeDate
                         ->get($employee->id, collect())
                         ->get($date, collect());
+                    $leaveRequests = $this->leaveResolver->resolve($leaveRequests)['requests'];
                     $leaveTypes = $leaveRequests->pluck('leave_type')->unique()->values();
                     $attendanceRecords = $attendanceByEmployeeDate
                         ->get($employee->id, collect())
@@ -240,13 +247,22 @@ class AttendanceFingerprintPeriodReportService
                     $leaveUnverifiable = $leaveRequests->isNotEmpty()
                         && ! $verifiedManualLeave
                         && ! $verifiedImportedLeave;
-                    $schedule = $this->scheduleForDate(
-                        $employee,
+                    $scheduleCacheKey = implode(':', [
+                        $filters->unitId,
                         $date,
-                        $calendar,
-                        $weeklyByDay->get(CarbonImmutable::parse($date)->dayOfWeek),
-                        $matchingPeriods->first(),
-                    );
+                        $employee->category_id ?? 'none',
+                        $employee->work_schedule_profile_id ?? 'none',
+                    ]);
+                    if (! array_key_exists($scheduleCacheKey, $scheduleCache)) {
+                        $scheduleCache[$scheduleCacheKey] = $this->scheduleForDate(
+                            $employee,
+                            $date,
+                            $calendar,
+                            $weeklyByDay->get(CarbonImmutable::parse($date)->dayOfWeek),
+                            $matchingPeriods->first(),
+                        );
+                    }
+                    $schedule = $scheduleCache[$scheduleCacheKey];
                     if (
                         $calendar === null
                         && $day['source'] !== 'routine_schedule'
@@ -263,10 +279,10 @@ class AttendanceFingerprintPeriodReportService
                             'is_ambiguous' => $scheduleNeedsReview,
                         ];
                     }
-                    $scanResult = $this->evaluateScans($logs, $schedule);
                     $statusUnknown = $day['status'] === 'unknown';
                     $isWorking = $day['status'] === 'working';
                     $holiday = $day['status'] === 'non_working';
+                    $scanResult = $this->evaluateScans($logs, $schedule, $holiday);
                     $leaveConflict = $leaveTypes->count() > 1 || $leaveRequests->count() > 1;
                     $ambiguous = $day['is_ambiguous']
                         || $scanResult['is_ambiguous']
@@ -454,7 +470,8 @@ class AttendanceFingerprintPeriodReportService
                 'fingerprint_logs.attendance_date',
                 'fingerprint_logs.attendance_time',
             ])
-            ->groupBy(fn (FingerprintLog $log): string => $log->attendance_date->format('Y-m-d'));
+            ->groupBy(fn (FingerprintLog $log): string => $log->attendance_date->format('Y-m-d'))
+            ->map(fn (Collection $logs) => $logs->groupBy('employee_id'));
     }
 
     private function leaveRequests(AttendanceFingerprintPeriodReportFilters $filters): Collection
@@ -691,7 +708,7 @@ class AttendanceFingerprintPeriodReportService
         ];
     }
 
-    private function evaluateScans(Collection $logs, array $schedule): array
+    private function evaluateScans(Collection $logs, array $schedule, bool $nonWorkingDay): array
     {
         $groups = [];
         foreach ($logs as $log) {
@@ -719,6 +736,11 @@ class AttendanceFingerprintPeriodReportService
 
         if ($groups === []) {
             $result['candidate_status'] = 'no_fingerprint';
+
+            return $result;
+        }
+        if ($nonWorkingDay) {
+            $result['candidate_status'] = 'non_working_day';
 
             return $result;
         }

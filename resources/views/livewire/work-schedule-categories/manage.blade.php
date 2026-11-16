@@ -54,7 +54,7 @@
                                     x-on:click="editing = ! editing"
                                     class="rounded-lg border border-cyan-200 px-3 py-1.5 text-xs font-semibold text-cyan-800 hover:bg-cyan-50"
                                 >
-                                    <span x-text="editing ? 'Tutup' : 'Atur jam'"></span>
+                                    <span x-text="editing ? 'Tutup' : 'Atur jam'">Atur jam</span>
                                 </button>
                             @endif
                         </div>

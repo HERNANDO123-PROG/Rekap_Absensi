@@ -14,6 +14,7 @@ use App\Models\AttendanceRecord;
 use App\Models\Employee;
 use App\Models\Unit;
 use App\Models\User;
+use App\Services\Reports\AttendanceAnnualReportService;
 use App\Services\Reports\AttendanceFingerprintInitialReportService;
 use App\Services\Reports\AttendanceFingerprintPeriodReportService;
 use App\Services\Reports\AttendanceFingerprintPreviewService;
@@ -72,6 +73,21 @@ class ReportUiTest extends TestCase
             ->assertDontSee('Ekspor seluruh hasil');
 
         $this->assertSame([], $dataQueries);
+    }
+
+    public function test_annual_page_waits_for_filter_submission_before_calculating_report(): void
+    {
+        $unit = $this->createUnit('TK');
+        $this->actingAs(User::factory()->create());
+        $this->mock(AttendanceAnnualReportService::class, function ($mock): void {
+            $mock->shouldNotReceive('generate');
+        });
+
+        Livewire::test(AnnualReport::class)
+            ->assertSee('Pilih unit dan tahun')
+            ->set('unitId', (string) $unit->id)
+            ->set('year', 2026)
+            ->assertSee('Pilih unit dan tahun');
     }
 
     public function test_annual_page_renders_service_totals_months_and_export_link(): void

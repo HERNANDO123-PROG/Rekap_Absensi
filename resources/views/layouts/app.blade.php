@@ -10,27 +10,67 @@
         <link rel="preconnect" href="https://fonts.bunny.net">
         <link href="https://fonts.bunny.net/css?family=figtree:400,500,600,700&display=swap" rel="stylesheet" />
 
+        @livewireStyles
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     </head>
     <body class="font-sans antialiased bg-slate-100 text-slate-800">
-        <div x-data="{ sidebarOpen: false }" class="min-h-screen bg-slate-100">
-            <div class="lg:hidden">
-                <livewire:layout.navigation />
-            </div>
+        <div
+            x-data="{
+                sidebarOpen: false,
+                isMobile: window.innerWidth < 1024,
+                bodyOverflow: '',
+                toggleSidebar() {
+                    if (this.sidebarOpen) {
+                        this.closeSidebar();
+                        return;
+                    }
 
+                    this.bodyOverflow = document.body.style.overflow;
+                    this.sidebarOpen = true;
+                    document.body.style.overflow = 'hidden';
+                    this.$nextTick(() => {
+                        const firstItem = this.$refs.sidebar.querySelector('a[href], button:not([disabled])');
+                        if (firstItem) firstItem.focus();
+                    });
+                },
+                closeSidebar(restoreFocus = true) {
+                    this.sidebarOpen = false;
+                    document.body.style.overflow = this.bodyOverflow;
+
+                    if (restoreFocus && window.innerWidth < 1024) {
+                        this.$nextTick(() => this.$refs.sidebarToggle.focus());
+                    }
+                }
+            }"
+            @keydown.escape.window="if (sidebarOpen) closeSidebar()"
+            @resize.window="isMobile = window.innerWidth < 1024; if (!isMobile && sidebarOpen) closeSidebar(false)"
+            class="min-h-screen bg-slate-100"
+        >
             <div class="app-shell">
-                <div x-show="sidebarOpen" x-transition.opacity @click="sidebarOpen = false" class="fixed inset-0 z-30 hidden bg-slate-900/45 lg:hidden" aria-hidden="true"></div>
+                <div
+                    x-show="sidebarOpen"
+                    x-transition.opacity
+                    @click="closeSidebar()"
+                    class="app-sidebar-overlay"
+                    aria-hidden="true"
+                ></div>
 
-                <aside :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'" class="app-sidebar">
+                <aside
+                    id="app-sidebar"
+                    x-ref="sidebar"
+                    :class="sidebarOpen ? 'is-open' : ''"
+                    :aria-hidden="isMobile && !sidebarOpen"
+                    :inert="isMobile && !sidebarOpen"
+                    class="app-sidebar"
+                >
                     <div class="flex items-center gap-3 border-b border-slate-800 px-6 py-5">
-                        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-500/20 text-lg font-bold text-cyan-300">A</div>
-                        <div>
-                            <p class="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-300">Absensi</p>
-                            <h1 class="text-lg font-bold text-white">Admin TK/SD</h1>
-                        </div>
+                        <span class="app-brand-mark app-brand-mark--sidebar" aria-label="Logo Khazanah Ilmu">
+                            <img src="{{ asset('images/logo.png') }}" alt="Logo Khazanah Ilmu">
+                        </span>
+                        <h1 class="text-lg font-bold text-white">Absensi TK/SD</h1>
                     </div>
 
-                    <nav class="sidebar-nav">
+                    <nav class="sidebar-nav" aria-label="Navigasi utama" @click="if (window.innerWidth < 1024 && $event.target.closest('a')) closeSidebar()">
                         @php($dashboardLink = ['label' => 'Dashboard', 'route' => 'dashboard', 'icon' => '⌂'])
                         @php($isDashboardActive = request()->routeIs('dashboard'))
                         <a href="{{ route('dashboard') }}" class="sidebar-link {{ $isDashboardActive ? 'active' : '' }}">
@@ -94,27 +134,43 @@
 
                 <div class="app-main">
                     <header class="app-header">
-                        <div class="flex items-center justify-between gap-3">
-                            <div class="flex items-center gap-3">
-                                <button type="button" @click="sidebarOpen = !sidebarOpen" class="app-sidebar-toggle lg:hidden" aria-label="Buka menu navigasi">
+                        <div class="app-header__inner">
+                            <div class="app-header__left">
+                                <button
+                                    type="button"
+                                    x-ref="sidebarToggle"
+                                    @click="toggleSidebar()"
+                                    :aria-expanded="sidebarOpen"
+                                    :aria-label="sidebarOpen ? 'Tutup menu' : 'Buka menu'"
+                                    aria-controls="app-sidebar"
+                                    class="app-sidebar-toggle lg:hidden"
+                                >
                                     <svg viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
                                         <path fill-rule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm1 4a1 1 0 100 2h12a1 1 0 100-2H4z" clip-rule="evenodd" />
                                     </svg>
                                 </button>
 
-                                <div>
-                                    <p class="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-600">Akses cepat</p>
-                                    <div class="mt-1 text-lg font-semibold text-slate-900">Panel Administrasi</div>
-                                </div>
+                                <a href="{{ route('dashboard') }}" class="app-header__identity" aria-label="Dashboard Khazanah Ilmu">
+                                    <span class="app-header__school-logo">
+                                        <img
+                                            src="{{ asset('images/logo.png') }}"
+                                            alt="Lambang Sekolah Dasar Khazanah Ilmu"
+                                        >
+                                    </span>
+                                    <span class="app-header__identity-divider" aria-hidden="true"></span>
+                                    <span class="app-header__identity-copy">
+                                        <span class="app-header__eyebrow">Institusi Pendidikan Islam</span>
+                                        <span class="app-header__name">Khazanah Ilmu</span>
+                                    </span>
+                                </a>
                             </div>
-
-                            <div class="flex items-center gap-3">
-                                <div class="hidden rounded-full bg-slate-100 px-3 py-1.5 text-sm text-slate-600 sm:block">
+                            <div class="app-header__right">
+                                <div class="app-header__date">
                                     {{ now()->translatedFormat('d M Y') }}
                                 </div>
                                 <form method="POST" action="{{ route('logout') }}">
                                     @csrf
-                                    <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700">
+                                    <button type="submit" class="app-header__logout">
                                         Keluar
                                     </button>
                                 </form>
@@ -134,5 +190,6 @@
                 </div>
             </div>
         </div>
+        @livewireScripts
     </body>
 </html>

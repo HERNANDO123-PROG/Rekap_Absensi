@@ -642,6 +642,7 @@ const leaveImportStatusLabels = {
     unmatched: 'NIP tidak ditemukan',
     ambiguous: 'NIP duplikat di master',
     invalid: 'Data tidak valid',
+    duplicate: 'Duplikat identik',
 };
 
 const leaveImportSummary = (container, entries) => {
@@ -678,11 +679,15 @@ const renderLeaveImportPreview = (form, data) => {
         ['NIP tidak ditemukan', data.unmatched],
         ['Data valid', data.valid_rows],
         ['Data tidak valid', data.invalid_rows],
+        ['Duplikat identik', data.duplicate_rows || 0],
     ]);
 
     rows.replaceChildren(...(data.preview_rows || []).map((row) => {
         const tableRow = document.createElement('tr');
-        const status = leaveImportStatusLabels[row.status] || row.status || 'Tidak diketahui';
+        const statusLabel = leaveImportStatusLabels[row.status] || row.status || 'Tidak diketahui';
+        const status = row.duplicate_of
+            ? `${statusLabel} · duplikat identik dari baris ${row.duplicate_of}`
+            : statusLabel;
         const values = [row.nip, row.name, row.position, row.date, row.leave_type, row.description, status];
 
         values.forEach((value, index) => {
@@ -690,8 +695,8 @@ const renderLeaveImportPreview = (form, data) => {
             cell.className = 'max-w-64 px-3 py-2 align-top text-slate-700';
             cell.textContent = value === null || value === undefined || value === '' ? '-' : String(value);
             if (index === 6) {
-                cell.classList.add(row.status === 'matched' ? 'font-semibold' : 'font-medium');
-                cell.classList.add(row.status === 'matched' ? 'text-emerald-700' : row.status === 'invalid' ? 'text-rose-700' : 'text-amber-700');
+                cell.classList.add(row.status === 'matched' && !row.duplicate_of ? 'font-semibold' : 'font-medium');
+                cell.classList.add(row.duplicate_of ? 'text-amber-700' : row.status === 'matched' ? 'text-emerald-700' : row.status === 'invalid' ? 'text-rose-700' : 'text-amber-700');
                 if (row.errors?.length) cell.title = row.errors.join(' ');
             }
             tableRow.append(cell);
@@ -717,6 +722,8 @@ const renderLeaveImportPreview = (form, data) => {
         showStatus(form, 'File ini sudah pernah diimpor untuk unit tersebut.', true);
     } else if (!hasValidRows) {
         showStatus(form, 'Tidak ada baris valid untuk diimpor.', true);
+    } else if (Number(data.duplicate_rows) > 0) {
+        showStatus(form, `Preview selesai. Ditemukan ${data.duplicate_rows} baris duplikat identik; semua baris akan tersimpan dan dihitung satu kali di rekap.`);
     } else {
         showStatus(form, 'Preview selesai. Periksa data sebelum impor.');
     }

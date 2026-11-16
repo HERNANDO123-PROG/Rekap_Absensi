@@ -41,6 +41,8 @@ class LeaveImportService
         $absenceReasonDistribution = array_fill_keys(array_map(static fn (AbsenceReason $reason): string => $reason->value, AbsenceReason::cases()), 0);
         $validationErrors = [];
         $previewRows = [];
+        $seenRows = [];
+        $duplicateRows = 0;
 
         foreach ($context['rows'] as $row) {
             $match = $row['nip'] !== '' ? $matchResults[$row['nip']] : null;
@@ -68,13 +70,29 @@ class LeaveImportService
                 $absenceReasonDistribution[$row['absence_reason']]++;
             }
 
-            $previewRows[] = $this->previewRow($row, $match, true);
+            $duplicateOf = null;
+            $duplicateKey = $this->duplicateKey($row);
+            if (array_key_exists($duplicateKey, $seenRows)) {
+                $duplicateOf = $seenRows[$duplicateKey];
+                $duplicateRows++;
+            } else {
+                $seenRows[$duplicateKey] = $row['source_row'];
+            }
+
+            $previewRows[] = $this->previewRow($row, $match, true, $duplicateOf);
         }
 
         $duplicateHeaderFields = array_values(array_intersect(
             $context['header_mapping']['ambiguous_fields'],
             ['nip', 'raw_name', 'position', 'request_date', 'request_time', 'leave_type', 'description'],
         ));
+
+        $warnings = $duplicateRows === 0
+            ? []
+            : ['Ditemukan '.$duplicateRows.' baris izin duplikat identik. Semua baris tetap disimpan, tetapi rekap menghitungnya satu kali.'];
+        if ($duplicateHeaderFields !== []) {
+            $warnings[] = 'Optional or required headers are ambiguous: '.implode(', ', $duplicateHeaderFields);
+        }
 
         return [
             'filename' => $context['filename'],
@@ -91,13 +109,14 @@ class LeaveImportService
             'preview_rows' => $previewRows,
             'valid_rows' => count($validRows),
             'invalid_rows' => count($context['rows']) - count($validRows),
+            'duplicate_rows' => $duplicateRows,
             'matched' => $matchingCounts[MatchingStatus::Matched->value],
             'unmatched' => $matchingCounts[MatchingStatus::Unmatched->value],
             'ambiguous' => $matchingCounts[MatchingStatus::Ambiguous->value],
             'leave_type_distribution' => $leaveTypeDistribution,
             'absence_reason_distribution' => $absenceReasonDistribution,
             'validation_errors' => $validationErrors,
-            'warnings' => $duplicateHeaderFields === [] ? [] : ['Optional or required headers are ambiguous: '.implode(', ', $duplicateHeaderFields)],
+            'warnings' => $warnings,
             'already_imported' => $this->alreadyImported($unitId, $context['file_hash']),
         ];
     }
@@ -406,7 +425,12 @@ class LeaveImportService
         );
     }
 
-    private function previewRow(array $row, ?EmployeeMatchResult $match, bool $isValid): array
+    private function previewRow(
+        array $row,
+        ?EmployeeMatchResult $match,
+        bool $isValid,
+        ?int $duplicateOf = null,
+    ): array
     {
         $status = ! $isValid
             ? 'invalid'
@@ -420,8 +444,22 @@ class LeaveImportService
             'leave_type' => $row['raw_leave_type'],
             'description' => $row['description'],
             'status' => $status,
+            'duplicate_of' => $duplicateOf,
             'errors' => $row['errors'],
         ];
+    }
+
+    private function duplicateKey(array $row): string
+    {
+        return serialize([
+            $row['nip'],
+            $row['request_date'],
+            $row['request_time'],
+            $row['leave_type'],
+            $row['description'],
+            $row['attachment'],
+            $row['absence_reason'],
+        ]);
     }
 
     private function safeFilename(string $filename): string

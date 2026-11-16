@@ -12,22 +12,30 @@
             </div>
             <div>
                 <label for="annual-year" class="mb-1 block text-sm font-medium text-slate-700">Tahun</label>
-                <input id="annual-year" type="number" min="2000" max="2100" wire:model="year" class="w-full rounded-lg border-slate-300 text-sm focus:border-cyan-600 focus:ring-cyan-600">
+                <input id="annual-year" type="number" min="2000" max="2100" wire:model.live="year" class="w-full rounded-lg border-slate-300 text-sm focus:border-cyan-600 focus:ring-cyan-600">
                 @error('year') <p class="mt-1 text-xs text-rose-700">{{ $message }}</p> @enderror
             </div>
             <div class="flex items-end">
-                <button type="submit" class="w-full rounded-lg bg-cyan-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-800">Tampilkan</button>
+                <button type="submit" wire:loading.attr="disabled" wire:target="applyFilters" class="w-full rounded-lg bg-cyan-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-800 disabled:cursor-wait disabled:opacity-70">
+                    <span wire:loading.remove wire:target="applyFilters">Tampilkan</span>
+                    <span wire:loading wire:target="applyFilters">Memuat...</span>
+                </button>
             </div>
             <div class="flex items-end">
                 @if ($unitId !== 'all')
                     <a href="{{ route('reports.annual.export', ['unit_id' => $unitId, 'year' => $year]) }}" class="w-full rounded-lg border border-emerald-700 px-4 py-2.5 text-center text-sm font-semibold text-emerald-800 hover:bg-emerald-50">Export Excel</a>
                 @else
-                    <button type="button" disabled title="Pilih satu unit untuk export" class="w-full cursor-not-allowed rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-400">Export Excel</button>
+                    <button type="button" disabled title="Pilih satu unit untuk export" class="w-full cursor-not-allowed rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-400">Pilih satu unit untuk export</button>
                 @endif
             </div>
         </div>
     </form>
 
+    @if (!$hasAppliedFilters)
+        <section class="rounded-xl border border-cyan-200 bg-cyan-50 p-5 text-sm text-cyan-950" role="status">
+            Pilih unit dan tahun, lalu tekan <strong>Tampilkan</strong> untuk memuat rekap tahunan.
+        </section>
+    @else
     <section class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div class="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -36,7 +44,7 @@
             </div>
             <div class="w-full sm:max-w-xs">
                 <label for="annual-search" class="sr-only">Cari pegawai</label>
-                <input id="annual-search" type="search" wire:model.live.debounce.300ms="search" placeholder="Cari nama, NIP, ID fingerprint..." class="w-full rounded-lg border-slate-300 text-sm focus:border-cyan-600 focus:ring-cyan-600">
+                <input id="annual-search" type="search" wire:model="search" placeholder="Cari nama, NIP, ID fingerprint..." class="w-full rounded-lg border-slate-300 text-sm focus:border-cyan-600 focus:ring-cyan-600">
             </div>
         </div>
 
@@ -71,12 +79,12 @@
                                 </td>
                                 <td class="px-3 py-3 text-slate-600">{{ $row['unit'] }}</td>
                                 @foreach (['hari_kerja', 'hadir', 'terlambat', 'pulang_awal', 'total_finger', 'izin', 'sakit', 'dinas', 'izin_keluar', 'alpha', 'perlu_verifikasi'] as $metric)
-                                    <td class="px-3 py-3 text-right tabular-nums text-slate-700">{{ $row['annual'][$metric] ?? 0 }}</td>
+                                    <td class="px-3 py-3 text-right tabular-nums text-slate-700">{{ array_key_exists($metric, $row['annual']) ? ($row['annual'][$metric] ?? '—') : 0 }}</td>
                                 @endforeach
                                 @foreach ($monthKeys as $month => $label)
                                     <td class="whitespace-nowrap px-3 py-3 text-right tabular-nums text-slate-700">
                                         @foreach (['hari_kerja' => 'Hari Kerja', 'hadir' => 'Hadir', 'terlambat' => 'Terlambat', 'pulang_awal' => 'Pulang Awal', 'total_finger' => 'Total Finger'] as $metric => $metricLabel)
-                                            <span class="block" title="{{ $metricLabel }}">{{ $row['monthly'][$month][$metric] ?? 0 }} <span class="text-xs text-slate-400">{{ $metricLabel }}</span></span>
+                                            <span class="block" title="{{ $metricLabel }}">{{ array_key_exists($metric, $row['monthly'][$month] ?? []) ? ($row['monthly'][$month][$metric] ?? '—') : 0 }} <span class="text-xs text-slate-400">{{ $metricLabel }}</span></span>
                                         @endforeach
                                     </td>
                                 @endforeach
@@ -85,8 +93,9 @@
                     </tbody>
                 </table>
             </div>
-            <p class="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">Setiap kolom bulan menampilkan hari kerja, hadir, terlambat, pulang awal, dan total fingerprint endpoint.</p>
+            <p class="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">Setiap kolom bulan menampilkan hari kerja, hadir, terlambat, pulang awal, dan total fingerprint endpoint. Tanda — berarti data belum cukup untuk dipastikan.</p>
             <div class="border-t border-slate-200 px-4 py-3">{{ $employees->links() }}</div>
         @endif
     </section>
+    @endif
 </div>
